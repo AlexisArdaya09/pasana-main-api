@@ -6,15 +6,19 @@ import { group } from '../database/schema';
 import { createOffsetPage, OffsetPage } from '../common/pagination/offset-page';
 import { CreateGroupDto } from './dto/create-group.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
-import { GroupSortBy, ListGroupsQueryDto, SortOrder } from './dto/list-groups.query';
+import {
+  GroupSortBy,
+  ListGroupsQueryDto,
+  SortOrder,
+} from './dto/list-groups.query';
 
 @Injectable()
 export class GroupService {
-  constructor(
-    @Inject('DB_CONNECTION') private readonly db: NodePgDatabase,
-  ) {}
+  constructor(@Inject('DB_CONNECTION') private readonly db: NodePgDatabase) {}
 
-  async findAll(query: ListGroupsQueryDto): Promise<OffsetPage<typeof group.$inferSelect>> {
+  async findAll(
+    query: ListGroupsQueryDto,
+  ): Promise<OffsetPage<typeof group.$inferSelect>> {
     const {
       name,
       sortBy = GroupSortBy.CREATED_AT,

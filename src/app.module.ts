@@ -4,6 +4,8 @@ import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './logger/logger.config';
 import { DatabaseModule } from './database/database.module';
 import { GroupModule } from './group/group.module';
+import { PersonModule } from './person/person.module';
+import { UserAccountModule } from './user-account/user-account.module';
 import { HealthController } from './health/health.controller';
 
 @Module({
@@ -15,6 +17,8 @@ import { HealthController } from './health/health.controller';
     WinstonModule.forRoot(winstonConfig),
     DatabaseModule,
     GroupModule,
+    PersonModule,
+    UserAccountModule,
   ],
   controllers: [HealthController],
 })

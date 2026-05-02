@@ -4,7 +4,10 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 import { AppModule } from './app.module';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { name: appName, version } = require('../package.json') as { name: string; version: string };
+const { name: appName, version } = require('../package.json') as {
+  name: string;
+  version: string;
+};
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -23,7 +26,9 @@ async function bootstrap() {
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Pasana API')
-    .setDescription(`API para gestión de pasanacos\n\n<a href="/api/docs-yaml" download="${appName}-${version}.yml">⬇ Download OpenAPI YAML</a>`)
+    .setDescription(
+      `API para gestión de pasanacos\n\n<a href="/api/docs-yaml" download="${appName}-${version}.yml">⬇ Download OpenAPI YAML</a>`,
+    )
     .setVersion(version)
     .build();
 

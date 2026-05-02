@@ -30,6 +30,10 @@ src/
 │   │   │   └── base.types.ts       # BaseTableType interface
 │   │   ├── group/
 │   │   │   └── group.schema.ts     # Tabla group
+│   │   ├── person/
+│   │   │   └── person.schema.ts    # Tabla person (nombre, apellido, cumpleaños, DNI)
+│   │   ├── user-account/
+│   │   │   └── user-account.schema.ts  # Tabla user_account (username, hash, password_expired)
 │   │   └── index.ts
 │   ├── migrations/                 # Archivos SQL generados por drizzle-kit
 │   ├── database.module.ts          # Módulo global, provee 'DB_CONNECTION'
@@ -44,6 +48,22 @@ src/
 │   ├── group.controller.ts
 │   ├── group.module.ts
 │   └── group.service.ts
+├── person/
+│   ├── dto/
+│   │   ├── create-person.dto.ts    # Persona + credenciales (crea cuenta en la misma operación)
+│   │   ├── update-person.dto.ts
+│   │   └── list-persons.query.ts
+│   ├── person.controller.ts
+│   ├── person.module.ts
+│   └── person.service.ts
+├── user-account/
+│   ├── dto/
+│   │   ├── create-user-account.dto.ts
+│   │   ├── update-user-account.dto.ts
+│   │   └── list-user-accounts.query.ts
+│   ├── user-account.controller.ts
+│   ├── user-account.module.ts
+│   └── user-account.service.ts
 ├── health/
 │   └── health.controller.ts
 ├── logger/
@@ -187,6 +207,83 @@ npm run format          # Prettier
 | `page` | number | `0` | Página (0-indexed) |
 | `size` | number | `10` | Elementos por página (máx 100) |
 
+### Persons
+
+Relación **1:1** con `user_account`: al crear una persona (`POST /persons`) se crea en la misma transacción su cuenta con **username**, **email**, **password** (hash bcrypt, nunca se devuelve) y **passwordExpired**.
+
+Campos únicos en `person`: `dni`, `phone`, `email`.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/persons` | Listar personas activas con su cuenta (paginado, filtros, orden) |
+| GET | `/persons/:id` | Persona por ID (incluye `userAccount` sin hash) |
+| POST | `/persons` | Crear persona **y** cuenta de usuario |
+| PATCH | `/persons/:id` | Actualizar datos de persona (nombre, apellido, cumpleaños, DNI, teléfono, email) |
+| DELETE | `/persons/:id` | Soft delete de persona y cuenta vinculada |
+| DELETE | `/persons/:id/hard` | Hard delete de persona y cuenta |
+
+#### POST /persons — Body
+
+| Campo | Tipo | Requerido | Descripción |
+|-------|------|-----------|-------------|
+| `firstName` | string | ✓ | Nombre (máx. 100) |
+| `lastName` | string | ✓ | Apellido (máx. 100) |
+| `birthday` | string (ISO 8601) | ✓ | Fecha de nacimiento (`YYYY-MM-DD`) |
+| `dni` | string | ✓ | Documento (único, máx. 32) |
+| `phone` | string | ✓ | Teléfono (único, máx. 30) |
+| `email` | string (email) | ✓ | Correo de la persona (único, máx. 255) |
+| `username` | string | ✓ | Username de la cuenta (único, máx. 100) |
+| `password` | string | ✓ | Contraseña en texto plano (mín. 8, máx. 128) |
+| `passwordExpired` | boolean | — | Forzar cambio en próximo login (default `false`) |
+
+#### GET /persons — Query params
+
+| Param | Tipo | Default | Descripción |
+|-------|------|---------|-------------|
+| `firstName` | string | — | Filtro parcial por nombre |
+| `lastName` | string | — | Filtro parcial por apellido |
+| `sortBy` | `createdAt` \| `firstName` \| `lastName` \| `dni` | `createdAt` | Orden |
+| `sortOrder` | `asc` \| `desc` | `desc` | Dirección |
+| `page` | number | `0` | Página |
+| `size` | number | `10` | Tamaño (máx. 100) |
+
+### User accounts
+
+CRUD independiente para cuentas. Las respuestas **no** incluyen el hash de contraseña.
+
+`personId` es **opcional**: una cuenta puede existir sin estar vinculada a una persona. Normalmente la cuenta se crea junto con la persona (`POST /persons`); `POST /user-accounts` sirve para crear una cuenta standalone o vincularla a una persona sin cuenta.
+
+Campos únicos en `user_account`: `username`, `email`.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/user-accounts` | Listar cuentas activas (paginado) |
+| GET | `/user-accounts/:id` | Cuenta por ID |
+| POST | `/user-accounts` | Crear cuenta (con o sin persona) |
+| PATCH | `/user-accounts/:id` | Actualizar username / email / password / passwordExpired |
+| DELETE | `/user-accounts/:id` | Soft delete |
+| DELETE | `/user-accounts/:id/hard` | Hard delete |
+
+#### POST /user-accounts — Body
+
+| Campo | Tipo | Requerido | Descripción |
+|-------|------|-----------|-------------|
+| `personId` | string | — | ID de la persona a vincular (opcional) |
+| `username` | string | ✓ | Username único (máx. 100) |
+| `email` | string (email) | ✓ | Correo de la cuenta (único, máx. 255) |
+| `password` | string | ✓ | Contraseña en texto plano (mín. 8, máx. 128) |
+| `passwordExpired` | boolean | — | Default `false` |
+
+#### GET /user-accounts — Query params
+
+| Param | Tipo | Default | Descripción |
+|-------|------|---------|-------------|
+| `username` | string | — | Filtro parcial por nombre de usuario |
+| `sortBy` | `createdAt` \| `username` | `createdAt` | Orden |
+| `sortOrder` | `asc` \| `desc` | `desc` | Dirección |
+| `page` | number | `0` | Página |
+| `size` | number | `10` | Tamaño (máx. 100) |
+
 #### Response paginado (OffsetPage)
 
 ```json
@@ -207,6 +304,8 @@ npm run format          # Prettier
 Disponible en: `http://localhost:3000/api/docs`
 
 El YAML descargable está en: `http://localhost:3000/api/docs-yaml`
+
+Los tags **Persons** y **User accounts** documentan campos, validaciones y el comportamiento de contraseñas (solo entrada en texto plano; persistencia como hash).
 
 ---
 
@@ -240,6 +339,11 @@ npm run db:migrate:prod  # Migraciones contra prod (requiere .env.prod)
 - Columnas en **snake_case**, propiedades TypeScript en **camelCase**
 - Todas las tablas incluyen: `id` (cuid), `created_at`, `updated_at`, `deleted_at`
 - Soft delete mediante `deleted_at` (null = activo)
+
+### Tablas `person` y `user_account`
+
+- **`person`:** `first_name`, `last_name`, `birthday` (date), `dni` (único), `phone` (único), `email` (único).
+- **`user_account`:** `person_id` (FK a `person`, único, **nullable** → cuenta puede existir sin persona), `username` (único), `email` (único), `password_hash` (bcrypt), `password_expired` (boolean).
 
 ### Agregar un nuevo módulo con tabla
 

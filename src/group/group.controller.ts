@@ -22,7 +22,9 @@ export class GroupController {
   constructor(private readonly groupService: GroupService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List active groups (paginated, filterable, sortable)' })
+  @ApiOperation({
+    summary: 'List active groups (paginated, filterable, sortable)',
+  })
   @ApiResponse({ status: 200, description: 'Paginated list of active groups' })
   findAll(@Query() query: ListGroupsQueryDto) {
     return this.groupService.findAll(query);

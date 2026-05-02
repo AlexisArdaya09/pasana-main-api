@@ -2,9 +2,9 @@ import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
-export enum GroupSortBy {
-  NAME = 'name',
+export enum UserAccountSortBy {
   CREATED_AT = 'createdAt',
+  USERNAME = 'username',
 }
 
 export enum SortOrder {
@@ -12,18 +12,21 @@ export enum SortOrder {
   DESC = 'desc',
 }
 
-export class ListGroupsQueryDto {
+export class ListUserAccountsQueryDto {
   @ApiPropertyOptional({
-    description: 'Filter by name (partial match, case-insensitive)',
+    description: 'Filtro parcial por nombre de usuario (case-insensitive)',
   })
   @IsOptional()
   @IsString()
-  name?: string;
+  username?: string;
 
-  @ApiPropertyOptional({ enum: GroupSortBy, default: GroupSortBy.CREATED_AT })
+  @ApiPropertyOptional({
+    enum: UserAccountSortBy,
+    default: UserAccountSortBy.CREATED_AT,
+  })
   @IsOptional()
-  @IsEnum(GroupSortBy)
-  sortBy?: GroupSortBy = GroupSortBy.CREATED_AT;
+  @IsEnum(UserAccountSortBy)
+  sortBy?: UserAccountSortBy = UserAccountSortBy.CREATED_AT;
 
   @ApiPropertyOptional({ enum: SortOrder, default: SortOrder.DESC })
   @IsOptional()
