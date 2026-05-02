@@ -1,99 +1,287 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Pasana Main API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+REST API principal del proyecto Pasana. Construida con NestJS, Drizzle ORM y PostgreSQL (Supabase).
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Stack
 
-## Description
+- **Runtime:** Node.js
+- **Framework:** NestJS 10
+- **Lenguaje:** TypeScript
+- **ORM:** Drizzle ORM
+- **Base de datos:** PostgreSQL (Supabase)
+- **Compilador:** SWC (builds más rápidos que tsc)
+- **Logger:** Winston + nest-winston
+- **Docs:** Swagger / OpenAPI
+- **Deploy:** Render
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+---
 
-## Project setup
+## Estructura del proyecto
 
-```bash
-$ npm install
+```
+src/
+├── common/
+│   └── pagination/
+│       └── offset-page.ts          # OffsetPage<T> + createOffsetPage
+├── database/
+│   ├── schema/
+│   │   ├── base/
+│   │   │   ├── base.schema.ts      # Columnas compartidas (id, timestamps, deletedAt)
+│   │   │   └── base.types.ts       # BaseTableType interface
+│   │   ├── group/
+│   │   │   └── group.schema.ts     # Tabla group
+│   │   └── index.ts
+│   ├── migrations/                 # Archivos SQL generados por drizzle-kit
+│   ├── database.module.ts          # Módulo global, provee 'DB_CONNECTION'
+│   ├── drizzle.config.ts           # Config drizzle-kit (lee process.env.DB_*)
+│   ├── migrate.ts                  # Migrador programático
+│   └── seed.ts                     # Script de seed
+├── group/
+│   ├── dto/
+│   │   ├── create-group.dto.ts
+│   │   ├── update-group.dto.ts
+│   │   └── list-groups.query.ts    # Paginación, filtros y sorting
+│   ├── group.controller.ts
+│   ├── group.module.ts
+│   └── group.service.ts
+├── health/
+│   └── health.controller.ts
+├── logger/
+│   └── logger.config.ts            # Config Winston (dev/prod)
+├── app.module.ts
+└── main.ts                         # Bootstrap, CORS, Swagger, ValidationPipe
 ```
 
-## Compile and run the project
+---
+
+## Configuración inicial
+
+### 1. Instalar dependencias
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+npm install
 ```
 
-## Run tests
+### 2. Configurar variables de entorno
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+cp .env.example .env
 ```
 
-## Deployment
+```env
+DB_HOST=aws-1-us-west-2.pooler.supabase.com
+DB_PORT=5432
+DB_NAME=postgres
+DB_USER=postgres.<project-ref>
+DB_PASSWORD=tu-password
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+PORT=3000
+NODE_ENV=development
+```
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### 3. Aplicar migraciones
 
 ```bash
-$ npm install -g mau
-$ mau deploy
+npm run db:migrate
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+### 4. Levantar el servidor
 
-## Resources
+```bash
+npm run start:dev
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+---
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## Scripts
 
-## Support
+### Desarrollo
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```bash
+npm run start:dev       # Servidor con hot-reload
+npm run start:debug     # Servidor con debugger
+```
 
-## Stay in touch
+### Build
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+```bash
+npm run build           # Compilación SWC
+```
 
-## License
+### Migraciones y base de datos
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+```bash
+# Generar nueva migración SQL a partir del schema
+npm run db:generate --name=<nombre>
+
+# Aplicar migraciones pendientes (desarrollo)
+npm run db:migrate
+
+# Aplicar migraciones en producción
+npm run db:migrate:prod
+
+# Sincronizar schema directo a la DB (sin generar archivo, solo dev)
+npm run db:push
+
+# Drizzle Studio (UI para explorar datos)
+npm run db:studio
+
+# Ejecutar seed
+npm run db:seed
+```
+
+#### Flujo para agregar una tabla o columna
+
+```
+1. Crear o editar el schema en src/database/schema/<entidad>/<entidad>.schema.ts
+2. Exportarlo desde src/database/schema/index.ts
+3. npm run db:generate --name=add_<nombre>
+4. Revisar src/database/migrations/<timestamp>_add_<nombre>.sql
+5. npm run db:migrate
+```
+
+### Tests
+
+```bash
+npm run test            # Unit tests
+npm run test:watch      # Watch mode
+npm run test:cov        # Coverage
+npm run test:e2e        # End-to-end
+```
+
+### Calidad de código
+
+```bash
+npm run lint            # ESLint con auto-fix
+npm run format          # Prettier
+```
+
+---
+
+## Endpoints
+
+### Health
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/health` | Estado de la API |
+
+### Groups
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/groups` | Listar grupos activos (paginado, filtrable, ordenable) |
+| GET | `/groups/:id` | Obtener grupo por ID |
+| POST | `/groups` | Crear grupo |
+| PATCH | `/groups/:id` | Actualizar grupo |
+| DELETE | `/groups/:id` | Eliminar lógicamente (soft delete) |
+| DELETE | `/groups/:id/hard` | Eliminar físicamente (hard delete) |
+
+#### GET /groups — Query params
+
+| Param | Tipo | Default | Descripción |
+|-------|------|---------|-------------|
+| `name` | string | — | Filtro parcial por nombre (case-insensitive) |
+| `sortBy` | `name` \| `createdAt` | `createdAt` | Campo de ordenamiento |
+| `sortOrder` | `asc` \| `desc` | `desc` | Dirección del ordenamiento |
+| `page` | number | `0` | Página (0-indexed) |
+| `size` | number | `10` | Elementos por página (máx 100) |
+
+#### Response paginado (OffsetPage)
+
+```json
+{
+  "content": [...],
+  "totalSize": 20,
+  "totalPages": 2,
+  "numberOfElements": 10,
+  "pageNumber": 0,
+  "empty": false,
+  "size": 10,
+  "offset": 0
+}
+```
+
+### Documentación Swagger
+
+Disponible en: `http://localhost:3000/api/docs`
+
+El YAML descargable está en: `http://localhost:3000/api/docs-yaml`
+
+---
+
+## Multi-ambiente
+
+| Archivo | Ambiente |
+|---------|----------|
+| `.env` | Development (default) |
+| `.env.prod` | Production |
+
+```bash
+npm run start:dev    # Carga .env
+npm run start:prod   # Carga .env.prod
+npm run db:migrate:prod  # Migraciones contra prod (requiere .env.prod)
+```
+
+---
+
+## Logging
+
+- **Development:** logs coloreados y legibles en consola
+- **Production:** JSON estructurado a stdout (capturado por Render)
+
+---
+
+## Base de datos
+
+### Convenciones
+
+- Nombres de tablas en **singular** (`group`, `user`, `member`)
+- Columnas en **snake_case**, propiedades TypeScript en **camelCase**
+- Todas las tablas incluyen: `id` (cuid), `created_at`, `updated_at`, `deleted_at`
+- Soft delete mediante `deleted_at` (null = activo)
+
+### Agregar un nuevo módulo con tabla
+
+1. Crear el schema en `src/database/schema/member/member.schema.ts`:
+
+```typescript
+import { pgTable, varchar } from 'drizzle-orm/pg-core';
+import { baseSchema } from '../base/base.schema';
+
+export const member = pgTable('member', {
+  ...baseSchema,
+  name: varchar('name', { length: 150 }).notNull(),
+});
+```
+
+2. Exportar desde `src/database/schema/index.ts`:
+
+```typescript
+export * from './member/member.schema';
+```
+
+3. Generar y aplicar la migración:
+
+```bash
+npm run db:generate --name=add_member_table
+npm run db:migrate
+```
+
+4. Crear el módulo NestJS en `src/member/` siguiendo la estructura de `src/group/`.
+
+---
+
+## Deploy en Render
+
+**Build command:**
+```bash
+npm run build
+```
+
+**Start command:**
+```bash
+npm run start:prod
+```
+
+Las variables de entorno se configuran en el dashboard de Render (equivalente a `.env.prod`).
