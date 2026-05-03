@@ -1,8 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
+import { WINSTON_MODULE_NEST_PROVIDER, WINSTON_MODULE_PROVIDER } from 'nest-winston';
+import { Logger } from 'winston';
 import { AppModule } from './app.module';
+import { HttpLoggingInterceptor } from './common/interceptors/http-logging.interceptor';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { name: appName, version } = require('../package.json') as {
   name: string;
@@ -13,6 +15,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
   app.enableCors({ origin: '*' });
+  app.getHttpAdapter().getInstance().disable('etag');
 
   app.useLogger(app.get(WINSTON_MODULE_NEST_PROVIDER));
 
@@ -24,10 +27,20 @@ async function bootstrap() {
     }),
   );
 
+  app.useGlobalInterceptors(
+    new HttpLoggingInterceptor(app.get<Logger>(WINSTON_MODULE_PROVIDER)),
+  );
+
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Pasana API')
     .setDescription(
-      `API para gestión de pasanacos\n\n<a href="/api/docs-yaml" download="${appName}-${version}.yml">⬇ Download OpenAPI YAML</a>`,
+      `API para gestión de pasanacos (grupos de ahorro rotativo).\n\n` +
+      `**Flujo de vida de un pasanaco:**\n` +
+      `1. \`POST /groups\` — Crear grupo (frecuencia: WEEKLY / MONTHLY / BIRTHDAY)\n` +
+      `2. \`POST /groups/:id/members\` — Agregar participantes\n` +
+      `3. \`POST /groups/:id/initialize\` — Inicializar turnos (calcula y fija \`startDate\` / \`endDate\` automáticamente)\n` +
+      `4. \`POST /payments\` — Registrar pagos. Al completarse el último turno el grupo pasa a \`COMPLETED\` automáticamente.\n\n` +
+      `<a href="/api/docs-yaml" download="${appName}-${version}.yml">⬇ Download OpenAPI YAML</a>`,
     )
     .setVersion(version)
     .build();

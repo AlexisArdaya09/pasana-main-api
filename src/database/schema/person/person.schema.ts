@@ -7,7 +7,6 @@ export const person = pgTable('person', {
   firstName: varchar('first_name', { length: 100 }).notNull(),
   lastName: varchar('last_name', { length: 100 }).notNull(),
   birthday: date('birthday', { mode: 'date' }).notNull(),
-  dni: varchar('dni', { length: 32 }).notNull().unique(),
   phone: varchar('phone', { length: 30 }).notNull().unique(),
   email: varchar('email', { length: 255 }).notNull().unique(),
 });
@@ -16,7 +15,6 @@ export type Person = BaseTableType & {
   firstName: string;
   lastName: string;
   birthday: Date;
-  dni: string;
   phone: string;
   email: string;
 };

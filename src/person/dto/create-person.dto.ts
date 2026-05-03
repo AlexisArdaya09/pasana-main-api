@@ -30,12 +30,6 @@ export class CreatePersonDto {
   @IsDateString()
   birthday: string;
 
-  @ApiProperty({ example: '12345678' })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(32)
-  dni: string;
-
   @ApiProperty({ example: '+54 9 11 1234-5678' })
   @IsString()
   @IsNotEmpty()
@@ -47,23 +41,28 @@ export class CreatePersonDto {
   @MaxLength(255)
   email: string;
 
-  @ApiProperty({ example: 'mgarcia' })
+  @ApiPropertyOptional({
+    description: 'Username de la cuenta de usuario. Si se omite, no se crea cuenta.',
+    example: 'mgarcia',
+  })
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
-  username: string;
+  username?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description:
-      'Contraseña en texto plano; se almacena como hash (bcrypt) y no se devuelve en las respuestas',
+      'Contraseña en texto plano; se almacena como hash (bcrypt) y no se devuelve en las respuestas. Requerida si se envía username.',
     example: 'SecretP@ssw0rd',
     format: 'password',
   })
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MinLength(8)
   @MaxLength(128)
-  password: string;
+  password?: string;
 
   @ApiPropertyOptional({
     description:

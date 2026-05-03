@@ -6,7 +6,6 @@ export enum PersonSortBy {
   CREATED_AT = 'createdAt',
   FIRST_NAME = 'firstName',
   LAST_NAME = 'lastName',
-  DNI = 'dni',
 }
 
 export enum SortOrder {

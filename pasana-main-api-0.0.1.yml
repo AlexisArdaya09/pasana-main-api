@@ -1,0 +1,924 @@
+openapi: 3.0.0
+paths:
+  /health:
+    get:
+      operationId: HealthController_check
+      summary: Check API health status
+      parameters: []
+      responses:
+        '200':
+          description: API is up and running
+      tags:
+        - Health
+  /groups:
+    get:
+      operationId: GroupController_findAll
+      summary: List active groups (paginated, filterable, sortable)
+      parameters:
+        - name: name
+          required: false
+          in: query
+          description: Filter by name (partial match, case-insensitive)
+          schema:
+            type: string
+        - name: sortBy
+          required: false
+          in: query
+          schema:
+            default: createdAt
+            enum:
+              - name
+              - createdAt
+            type: string
+        - name: sortOrder
+          required: false
+          in: query
+          schema:
+            default: desc
+            enum:
+              - asc
+              - desc
+            type: string
+        - name: page
+          required: false
+          in: query
+          schema:
+            minimum: 0
+            default: 0
+            type: number
+        - name: size
+          required: false
+          in: query
+          schema:
+            minimum: 1
+            maximum: 100
+            default: 10
+            type: number
+      responses:
+        '200':
+          description: Paginated list of active groups
+      tags:
+        - Groups
+    post:
+      operationId: GroupController_create
+      summary: Create a new group
+      description: >-
+        Creates a group without dates. startDate and endDate are calculated
+        automatically when turns are initialized.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGroupDto'
+      responses:
+        '201':
+          description: ''
+      tags:
+        - Groups
+  /groups/{id}:
+    get:
+      operationId: GroupController_findOne
+      summary: Get a group by ID
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Group ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+        '404':
+          description: ''
+      tags:
+        - Groups
+    patch:
+      operationId: GroupController_update
+      summary: Update a group
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Group ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGroupDto'
+      responses:
+        '200':
+          description: ''
+        '404':
+          description: ''
+      tags:
+        - Groups
+    delete:
+      operationId: GroupController_softDelete
+      summary: Soft delete a group
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Group ID
+          schema:
+            type: string
+      responses:
+        '204':
+          description: ''
+        '404':
+          description: ''
+      tags:
+        - Groups
+  /groups/{id}/initialize:
+    post:
+      operationId: GroupController_initializeTurns
+      summary: Initialize turns for a group
+      description: >-
+        Creates one turn per active member and activates the first one.
+        Calculates and sets startDate (first turn) and endDate (last turn) on
+        the group. Call this once all members have been added.
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Group ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InitializeTurnsDto'
+      responses:
+        '201':
+          description: Turns created, group dates calculated, first turn activated
+        '400':
+          description: No members / turns already initialized
+        '404':
+          description: Group not found
+      tags:
+        - Groups
+  /groups/{id}/hard:
+    delete:
+      operationId: GroupController_hardDelete
+      summary: Hard delete a group
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Group ID
+          schema:
+            type: string
+      responses:
+        '204':
+          description: ''
+        '404':
+          description: ''
+      tags:
+        - Groups
+  /groups/{groupId}/members:
+    get:
+      operationId: GroupMemberController_listMembers
+      summary: List members of a group
+      parameters:
+        - name: groupId
+          required: true
+          in: path
+          description: Group ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+      tags:
+        - Group Members
+    post:
+      operationId: GroupMemberController_addMember
+      summary: Add a person to a group
+      parameters:
+        - name: groupId
+          required: true
+          in: path
+          description: Group ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMemberDto'
+      responses:
+        '201':
+          description: ''
+        '400':
+          description: Turns already initialized
+        '409':
+          description: Person already member / turnOrder taken
+      tags:
+        - Group Members
+  /groups/{groupId}/members/{personId}:
+    delete:
+      operationId: GroupMemberController_removeMember
+      summary: Remove a person from a group (before initialization)
+      parameters:
+        - name: groupId
+          required: true
+          in: path
+          description: Group ID
+          schema:
+            type: string
+        - name: personId
+          required: true
+          in: path
+          description: Person ID
+          schema:
+            type: string
+      responses:
+        '204':
+          description: ''
+        '400':
+          description: Turns already initialized
+        '404':
+          description: Member not found
+      tags:
+        - Group Members
+  /groups/{groupId}/turns:
+    get:
+      operationId: TurnController_findAll
+      summary: List turns for a group
+      parameters:
+        - name: groupId
+          required: true
+          in: path
+          description: Group ID
+          schema:
+            type: string
+        - name: status
+          required: false
+          in: query
+          schema:
+            enum:
+              - PENDING
+              - ACTIVE
+              - COMPLETED
+            type: string
+        - name: page
+          required: false
+          in: query
+          schema:
+            default: 0
+            type: number
+        - name: size
+          required: false
+          in: query
+          schema:
+            default: 20
+            type: number
+      responses:
+        '200':
+          description: Paginated list of turns
+      tags:
+        - Turns
+  /turns/{id}:
+    get:
+      operationId: TurnController_findOne
+      summary: Get a turn by ID
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Turn ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+        '404':
+          description: ''
+      tags:
+        - Turns
+  /turns/{id}/summary:
+    get:
+      operationId: TurnController_getSummary
+      summary: Get full turn summary
+      description: >-
+        Returns totalExpectedAmount, totalPaidAmount, percentagePaid,
+        participantsPaid[], participantsPending[]
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Turn ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ''
+        '404':
+          description: ''
+      tags:
+        - Turns
+  /turns/{id}/complete:
+    post:
+      operationId: TurnController_completeTurn
+      summary: Manually complete a turn (admin)
+      description: >-
+        Force-completes a turn if totalPaidAmount >= totalExpectedAmount.
+        Activates the next PENDING turn.
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Turn ID
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Turn completed
+        '400':
+          description: Not fully paid or wrong status
+      tags:
+        - Turns
+  /payments:
+    post:
+      operationId: PaymentController_register
+      summary: Register a payment for a participant in an active turn
+      description: >-
+        Validates participant membership, prevents duplicate payments, updates
+        totalPaidAmount atomically (FOR UPDATE lock). Auto-completes the turn
+        and activates the next one when fully paid.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterPaymentDto'
+      responses:
+        '201':
+          description: Payment registered
+        '400':
+          description: Turn is not ACTIVE
+        '404':
+          description: Turn or participant not found / not a member
+        '409':
+          description: Already paid for this turn
+      tags:
+        - Payments
+  /payments/turns/{turnId}:
+    get:
+      operationId: PaymentController_findByTurn
+      summary: List payments for a turn
+      parameters:
+        - name: turnId
+          required: true
+          in: path
+          description: Turn ID
+          schema:
+            type: string
+        - name: size
+          required: false
+          in: query
+          schema:
+            type: number
+        - name: page
+          required: false
+          in: query
+          schema:
+            type: number
+      responses:
+        '200':
+          description: ''
+      tags:
+        - Payments
+  /persons:
+    get:
+      operationId: PersonController_findAll
+      summary: List active persons with user account (paginated, filterable, sortable)
+      parameters:
+        - name: firstName
+          required: false
+          in: query
+          description: Filtro parcial por nombre (case-insensitive)
+          schema:
+            type: string
+        - name: lastName
+          required: false
+          in: query
+          description: Filtro parcial por apellido (case-insensitive)
+          schema:
+            type: string
+        - name: sortBy
+          required: false
+          in: query
+          schema:
+            default: createdAt
+            enum:
+              - createdAt
+              - firstName
+              - lastName
+            type: string
+        - name: sortOrder
+          required: false
+          in: query
+          schema:
+            default: desc
+            enum:
+              - asc
+              - desc
+            type: string
+        - name: page
+          required: false
+          in: query
+          schema:
+            minimum: 0
+            default: 0
+            type: number
+        - name: size
+          required: false
+          in: query
+          schema:
+            minimum: 1
+            maximum: 100
+            default: 10
+            type: number
+      responses:
+        '200':
+          description: Paginated list; passwords are never included
+      tags:
+        - Persons
+    post:
+      operationId: PersonController_create
+      summary: Create person and linked user account
+      description: >-
+        Crea la persona (firstName, lastName, birthday, phone, email) y
+        opcionalmente en la misma transacción la cuenta (username, password
+        hasheada con bcrypt, passwordExpired). La contraseña nunca se devuelve.
+        phone y email de persona son únicos; username y email de cuenta son
+        únicos.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePersonDto'
+      responses:
+        '201':
+          description: Person and account created
+        '409':
+          description: Phone, email, or username already in use
+      tags:
+        - Persons
+  /persons/{id}:
+    get:
+      operationId: PersonController_findOne
+      summary: Get a person and linked user account by person ID
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Person ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Person with nested userAccount (no password hash)
+        '404':
+          description: Person not found
+      tags:
+        - Persons
+    patch:
+      operationId: PersonController_update
+      summary: Update person fields
+      description: >-
+        Actualiza firstName, lastName, birthday, phone y/o email. Todos los
+        campos son opcionales. Para credenciales de cuenta use `/user-accounts`.
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Person ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePersonDto'
+      responses:
+        '200':
+          description: Person updated
+        '404':
+          description: Person not found
+        '409':
+          description: Phone or email already in use
+      tags:
+        - Persons
+    delete:
+      operationId: PersonController_softDelete
+      summary: Soft delete person and linked user account
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Person ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Person and account soft deleted
+        '404':
+          description: Person not found
+      tags:
+        - Persons
+  /persons/{id}/hard:
+    delete:
+      operationId: PersonController_hardDelete
+      summary: Hard delete person and linked user account
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: Person ID
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Permanently deleted
+        '404':
+          description: Person not found
+      tags:
+        - Persons
+  /user-accounts:
+    get:
+      operationId: UserAccountController_findAll
+      summary: List active user accounts (paginated, filterable, sortable)
+      parameters:
+        - name: username
+          required: false
+          in: query
+          description: Filtro parcial por nombre de usuario (case-insensitive)
+          schema:
+            type: string
+        - name: sortBy
+          required: false
+          in: query
+          schema:
+            default: createdAt
+            enum:
+              - createdAt
+              - username
+            type: string
+        - name: sortOrder
+          required: false
+          in: query
+          schema:
+            default: desc
+            enum:
+              - asc
+              - desc
+            type: string
+        - name: page
+          required: false
+          in: query
+          schema:
+            minimum: 0
+            default: 0
+            type: number
+        - name: size
+          required: false
+          in: query
+          schema:
+            minimum: 1
+            maximum: 100
+            default: 10
+            type: number
+      responses:
+        '200':
+          description: Paginated list; password hash is never returned
+      tags:
+        - User accounts
+    post:
+      operationId: UserAccountController_create
+      summary: Create standalone or linked user account
+      description: >-
+        Crea una cuenta con username, email y password (hash bcrypt). `personId`
+        es opcional: sin él la cuenta existe sin vinculación a ninguna persona.
+        Si se provee `personId`, la persona debe existir y no tener cuenta
+        activa.
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserAccountDto'
+      responses:
+        '201':
+          description: Account created
+        '404':
+          description: Person not found (if personId provided)
+        '409':
+          description: Person already has an account, or username/email already taken
+      tags:
+        - User accounts
+  /user-accounts/{id}:
+    get:
+      operationId: UserAccountController_findOne
+      summary: Get user account by ID
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: User account ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Account found (no password hash)
+        '404':
+          description: Not found
+      tags:
+        - User accounts
+    patch:
+      operationId: UserAccountController_update
+      summary: Update user account
+      description: >-
+        Actualiza username, email, passwordExpired y/o password (se re-hashea
+        con bcrypt). username y email son únicos entre cuentas activas. El hash
+        nunca se expone en respuestas.
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: User account ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserAccountDto'
+      responses:
+        '200':
+          description: Updated
+        '404':
+          description: Not found
+        '409':
+          description: Username or email already taken
+      tags:
+        - User accounts
+    delete:
+      operationId: UserAccountController_softDelete
+      summary: Soft delete user account
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: User account ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Soft deleted
+        '404':
+          description: Not found
+      tags:
+        - User accounts
+  /user-accounts/{id}/hard:
+    delete:
+      operationId: UserAccountController_hardDelete
+      summary: Hard delete user account
+      parameters:
+        - name: id
+          required: true
+          in: path
+          description: User account ID
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Permanently deleted
+        '404':
+          description: Not found
+      tags:
+        - User accounts
+info:
+  title: Pasana API
+  description: >-
+    API para gestión de pasanacos (grupos de ahorro rotativo).
+
+
+    **Flujo de vida de un pasanaco:**
+
+    1. `POST /groups` — Crear grupo (frecuencia: WEEKLY / MONTHLY / BIRTHDAY)
+
+    2. `POST /groups/:id/members` — Agregar participantes
+
+    3. `POST /groups/:id/initialize` — Inicializar turnos (calcula y fija
+    `startDate` / `endDate` automáticamente)
+
+    4. `POST /payments` — Registrar pagos. Al completarse el último turno el
+    grupo pasa a `COMPLETED` automáticamente.
+
+
+    <a href="/api/docs-yaml" download="pasana-main-api-0.0.1.yml">⬇ Download
+    OpenAPI YAML</a>
+  version: 0.0.1
+  contact: {}
+tags: []
+servers: []
+components:
+  schemas:
+    CreateGroupDto:
+      type: object
+      properties:
+        name:
+          type: string
+          example: Pasanaco Enero 2025
+        description:
+          type: string
+          example: Grupo de ahorro mensual del equipo
+        frequency:
+          type: string
+          enum:
+            - WEEKLY
+            - MONTHLY
+            - BIRTHDAY
+          example: MONTHLY
+        contributionAmount:
+          type: number
+          description: Monto que cada participante aporta por turno
+          example: 1000
+      required:
+        - name
+        - frequency
+        - contributionAmount
+    InitializeTurnsDto:
+      type: object
+      properties:
+        startDate:
+          type: string
+          description: >-
+            Fecha a partir de la cual se calculan los turnos (YYYY-MM-DD). Si no
+            se envía, se usa la fecha de hoy.
+          example: '2025-01-01'
+    UpdateGroupDto:
+      type: object
+      properties:
+        name:
+          type: string
+          example: Pasanaco Enero 2025
+        description:
+          type: string
+          example: Grupo de ahorro mensual del equipo
+        frequency:
+          type: string
+          enum:
+            - WEEKLY
+            - MONTHLY
+            - BIRTHDAY
+          example: MONTHLY
+        contributionAmount:
+          type: number
+          description: Monto que cada participante aporta por turno
+          example: 1000
+    AddMemberDto:
+      type: object
+      properties:
+        personId:
+          type: string
+          description: ID de la persona a agregar
+        turnOrder:
+          type: number
+          description: >-
+            Posición en el orden de turnos (1 = primero en cobrar). Para grupos
+            WEEKLY/MONTHLY determina el orden de cobro. Para grupos BIRTHDAY es
+            un desempate cuando dos personas comparten fecha de nacimiento. Si
+            no se envía, se asigna automáticamente al final.
+          example: 1
+      required:
+        - personId
+    RegisterPaymentDto:
+      type: object
+      properties:
+        participantId:
+          type: string
+          description: ID del participante (person) que realiza el pago
+        turnId:
+          type: string
+          description: ID del turno activo
+      required:
+        - participantId
+        - turnId
+    CreatePersonDto:
+      type: object
+      properties:
+        firstName:
+          type: string
+          example: María
+        lastName:
+          type: string
+          example: García
+        birthday:
+          type: string
+          description: Fecha de nacimiento (ISO 8601)
+          example: '1990-05-15'
+        phone:
+          type: string
+          example: +54 9 11 1234-5678
+        email:
+          type: string
+          example: mgarcia@mail.com
+        username:
+          type: string
+          description: Username de la cuenta de usuario. Si se omite, no se crea cuenta.
+          example: mgarcia
+        password:
+          type: string
+          description: >-
+            Contraseña en texto plano; se almacena como hash (bcrypt) y no se
+            devuelve en las respuestas. Requerida si se envía username.
+          example: SecretP@ssw0rd
+          format: password
+        passwordExpired:
+          type: boolean
+          description: >-
+            Si es true, el cliente debe forzar cambio de contraseña en el
+            próximo inicio de sesión
+          default: false
+      required:
+        - firstName
+        - lastName
+        - birthday
+        - phone
+        - email
+    UpdatePersonDto:
+      type: object
+      properties:
+        firstName:
+          type: string
+          example: María
+        lastName:
+          type: string
+          example: García
+        birthday:
+          type: string
+          description: Fecha de nacimiento (ISO 8601)
+          example: '1990-05-15'
+        phone:
+          type: string
+          example: +54 9 11 1234-5678
+        email:
+          type: string
+          example: mgarcia@mail.com
+    CreateUserAccountDto:
+      type: object
+      properties:
+        personId:
+          type: string
+          description: ID de la persona a vincular (opcional)
+        username:
+          type: string
+          example: mgarcia
+        email:
+          type: string
+          example: mgarcia@mail.com
+        password:
+          type: string
+          description: Contraseña en texto plano; se persiste como hash bcrypt
+          format: password
+        passwordExpired:
+          type: boolean
+          default: false
+      required:
+        - username
+        - email
+        - password
+    UpdateUserAccountDto:
+      type: object
+      properties:
+        username:
+          type: string
+          example: nuevo_username
+        email:
+          type: string
+          example: nuevo@mail.com
+        password:
+          type: string
+          description: Nueva contraseña en texto plano; se reemplaza el hash almacenado
+          format: password
+        passwordExpired:
+          type: boolean
+          description: Marcar que la contraseña caducó y debe cambiarse en el próximo login

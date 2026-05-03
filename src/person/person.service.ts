@@ -1,10 +1,11 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, count, desc, eq, ilike, isNull, ne, SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, ilike, isNull, SQL } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as bcrypt from 'bcrypt';
 import { createId } from '@paralleldrive/cuid2';
@@ -21,21 +22,24 @@ import {
 const BCRYPT_ROUNDS = 10;
 
 export type PersonWithAccount = typeof person.$inferSelect & {
-  userAccount: Omit<typeof userAccount.$inferSelect, 'passwordHash'>;
+  userAccount: Omit<typeof userAccount.$inferSelect, 'passwordHash'> | null;
 };
 
 @Injectable()
 export class PersonService {
   constructor(@Inject('DB_CONNECTION') private readonly db: NodePgDatabase) {}
 
-  private mapAccount(row: typeof userAccount.$inferSelect) {
+  private mapAccount(
+    row: typeof userAccount.$inferSelect | null,
+  ): Omit<typeof userAccount.$inferSelect, 'passwordHash'> | null {
+    if (!row) return null;
     const { passwordHash, ...rest } = row;
     void passwordHash;
     return rest;
   }
 
   private async assertUniquePersonField(
-    field: 'dni' | 'phone' | 'email',
+    field: 'phone' | 'email',
     value: string,
     excludePersonId?: string,
   ) {
@@ -50,7 +54,7 @@ export class PersonService {
       : rows;
 
     if (taken.length > 0) {
-      const label = field === 'dni' ? 'DNI' : field.charAt(0).toUpperCase() + field.slice(1);
+      const label = field.charAt(0).toUpperCase() + field.slice(1);
       throw new ConflictException(`${label} "${value}" is already in use`);
     }
   }
@@ -88,10 +92,7 @@ export class PersonService {
       size = 10,
     } = query;
 
-    const conditions: SQL[] = [
-      isNull(person.deletedAt),
-      isNull(userAccount.deletedAt),
-    ];
+    const conditions: SQL[] = [isNull(person.deletedAt)];
     if (firstName) conditions.push(ilike(person.firstName, `%${firstName}%`));
     if (lastName) conditions.push(ilike(person.lastName, `%${lastName}%`));
     const where = and(...conditions);
@@ -101,26 +102,24 @@ export class PersonService {
         ? person.firstName
         : sortBy === PersonSortBy.LAST_NAME
           ? person.lastName
-          : sortBy === PersonSortBy.DNI
-            ? person.dni
-            : person.createdAt;
+          : person.createdAt;
     const orderFn = sortOrder === SortOrder.DESC ? desc : asc;
     const offset = page * size;
 
-    const rows = await this.db
-      .select({ p: person, ua: userAccount })
-      .from(person)
-      .innerJoin(userAccount, eq(person.id, userAccount.personId))
-      .where(where)
-      .orderBy(orderFn(orderCol))
-      .limit(size)
-      .offset(offset);
-
-    const [{ total }] = await this.db
-      .select({ total: count() })
-      .from(person)
-      .innerJoin(userAccount, eq(person.id, userAccount.personId))
-      .where(where);
+    const [rows, [{ total }]] = await Promise.all([
+      this.db
+        .select({ p: person, ua: userAccount })
+        .from(person)
+        .leftJoin(
+          userAccount,
+          and(eq(person.id, userAccount.personId), isNull(userAccount.deletedAt)),
+        )
+        .where(where)
+        .orderBy(orderFn(orderCol))
+        .limit(size)
+        .offset(offset),
+      this.db.select({ total: count() }).from(person).where(where),
+    ]);
 
     const content: PersonWithAccount[] = rows.map(({ p, ua }) => ({
       ...p,
@@ -134,14 +133,11 @@ export class PersonService {
     const [row] = await this.db
       .select({ p: person, ua: userAccount })
       .from(person)
-      .innerJoin(userAccount, eq(person.id, userAccount.personId))
-      .where(
-        and(
-          eq(person.id, id),
-          isNull(person.deletedAt),
-          isNull(userAccount.deletedAt),
-        ),
+      .leftJoin(
+        userAccount,
+        and(eq(person.id, userAccount.personId), isNull(userAccount.deletedAt)),
       )
+      .where(and(eq(person.id, id), isNull(person.deletedAt)))
       .limit(1);
 
     if (!row) throw new NotFoundException(`Person ${id} not found`);
@@ -150,18 +146,28 @@ export class PersonService {
   }
 
   async create(dto: CreatePersonDto): Promise<PersonWithAccount> {
-    await Promise.all([
-      this.assertUniquePersonField('dni', dto.dni),
+    const hasAccount = !!dto.username;
+
+    if (dto.username && !dto.password) {
+      throw new BadRequestException('password is required when username is provided');
+    }
+
+    const uniqueChecks: Promise<void>[] = [
       this.assertUniquePersonField('phone', dto.phone),
       this.assertUniquePersonField('email', dto.email),
-      this.assertUniqueAccountField('username', dto.username),
-      this.assertUniqueAccountField('email', dto.email),
-    ]);
+    ];
+
+    if (hasAccount) {
+      uniqueChecks.push(
+        this.assertUniqueAccountField('username', dto.username!),
+        this.assertUniqueAccountField('email', dto.email),
+      );
+    }
+
+    await Promise.all(uniqueChecks);
 
     const personId = createId();
-    const accountId = createId();
     const now = new Date();
-    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
     const birthday = new Date(dto.birthday + 'T12:00:00.000Z');
 
     await this.db.transaction(async (tx) => {
@@ -170,23 +176,25 @@ export class PersonService {
         firstName: dto.firstName,
         lastName: dto.lastName,
         birthday,
-        dni: dto.dni,
         phone: dto.phone,
         email: dto.email,
         createdAt: now,
         updatedAt: now,
       });
 
-      await tx.insert(userAccount).values({
-        id: accountId,
-        personId,
-        username: dto.username,
-        email: dto.email,
-        passwordHash,
-        passwordExpired: dto.passwordExpired ?? false,
-        createdAt: now,
-        updatedAt: now,
-      });
+      if (hasAccount) {
+        const passwordHash = await bcrypt.hash(dto.password!, BCRYPT_ROUNDS);
+        await tx.insert(userAccount).values({
+          id: createId(),
+          personId,
+          username: dto.username!,
+          email: dto.email,
+          passwordHash,
+          passwordExpired: dto.passwordExpired ?? false,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
     });
 
     return this.findOne(personId);
@@ -196,7 +204,6 @@ export class PersonService {
     await this.findOne(id);
 
     await Promise.all([
-      dto.dni !== undefined ? this.assertUniquePersonField('dni', dto.dni, id) : Promise.resolve(),
       dto.phone !== undefined ? this.assertUniquePersonField('phone', dto.phone, id) : Promise.resolve(),
       dto.email !== undefined ? this.assertUniquePersonField('email', dto.email, id) : Promise.resolve(),
     ]);
@@ -207,7 +214,6 @@ export class PersonService {
     if (dto.birthday !== undefined) {
       patch.birthday = new Date(dto.birthday + 'T12:00:00.000Z');
     }
-    if (dto.dni !== undefined) patch.dni = dto.dni;
     if (dto.phone !== undefined) patch.phone = dto.phone;
     if (dto.email !== undefined) patch.email = dto.email;
 
@@ -228,7 +234,7 @@ export class PersonService {
       await tx
         .update(userAccount)
         .set({ deletedAt: now, updatedAt: now })
-        .where(eq(userAccount.personId, id));
+        .where(and(eq(userAccount.personId, id), isNull(userAccount.deletedAt)));
     });
 
     return this.findOneIncludingDeleted(id);
@@ -253,7 +259,7 @@ export class PersonService {
     const [row] = await this.db
       .select({ p: person, ua: userAccount })
       .from(person)
-      .innerJoin(userAccount, eq(person.id, userAccount.personId))
+      .leftJoin(userAccount, eq(person.id, userAccount.personId))
       .where(eq(person.id, id))
       .limit(1);
 

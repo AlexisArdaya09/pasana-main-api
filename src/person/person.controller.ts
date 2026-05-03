@@ -52,10 +52,10 @@ export class PersonController {
   @ApiOperation({
     summary: 'Create person and linked user account',
     description:
-      'Crea la persona (firstName, lastName, birthday, dni, phone, email) y en la misma transacción la cuenta (username, email, password hasheada con bcrypt, passwordExpired). La contraseña nunca se devuelve. dni, phone y email de persona son únicos; username y email de cuenta son únicos.',
+      'Crea la persona (firstName, lastName, birthday, phone, email) y opcionalmente en la misma transacción la cuenta (username, password hasheada con bcrypt, passwordExpired). La contraseña nunca se devuelve. phone y email de persona son únicos; username y email de cuenta son únicos.',
   })
   @ApiResponse({ status: 201, description: 'Person and account created' })
-  @ApiResponse({ status: 409, description: 'DNI, phone, email, or username already in use' })
+  @ApiResponse({ status: 409, description: 'Phone, email, or username already in use' })
   create(@Body() dto: CreatePersonDto) {
     return this.personService.create(dto);
   }
@@ -64,12 +64,12 @@ export class PersonController {
   @ApiOperation({
     summary: 'Update person fields',
     description:
-      'Actualiza firstName, lastName, birthday, dni, phone y/o email. Todos los campos son opcionales. Para credenciales de cuenta use `/user-accounts`.',
+      'Actualiza firstName, lastName, birthday, phone y/o email. Todos los campos son opcionales. Para credenciales de cuenta use `/user-accounts`.',
   })
   @ApiParam({ name: 'id', description: 'Person ID' })
   @ApiResponse({ status: 200, description: 'Person updated' })
   @ApiResponse({ status: 404, description: 'Person not found' })
-  @ApiResponse({ status: 409, description: 'DNI, phone or email already in use' })
+  @ApiResponse({ status: 409, description: 'Phone or email already in use' })
   update(@Param('id') id: string, @Body() dto: UpdatePersonDto) {
     return this.personService.update(id, dto);
   }
