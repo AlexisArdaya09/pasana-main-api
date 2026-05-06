@@ -10,6 +10,7 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { createId } from '@paralleldrive/cuid2';
 import { group, groupMember, person, turn } from '../database/schema';
 import { AddMemberDto } from './dto/add-member.dto';
+import { ReorderMembersDto } from './dto/reorder-members.dto';
 
 @Injectable()
 export class GroupMemberService {
@@ -48,24 +49,6 @@ export class GroupMemberService {
 
     if (!p) throw new NotFoundException(`Person ${dto.personId} not found`);
 
-    const [duplicate] = await this.db
-      .select({ id: groupMember.id })
-      .from(groupMember)
-      .where(
-        and(
-          eq(groupMember.groupId, groupId),
-          eq(groupMember.personId, dto.personId),
-          isNull(groupMember.deletedAt),
-        ),
-      )
-      .limit(1);
-
-    if (duplicate) {
-      throw new ConflictException(
-        `Person ${dto.personId} is already a member of this group`,
-      );
-    }
-
     // Resolve turnOrder: use provided value or auto-assign next available
     let resolvedTurnOrder = dto.turnOrder;
     if (resolvedTurnOrder === undefined) {
@@ -103,6 +86,7 @@ export class GroupMemberService {
         personId: dto.personId,
         turnOrder: resolvedTurnOrder,
         status: 'ACTIVE',
+        customDate: dto.customDate ? new Date(dto.customDate + 'T12:00:00.000Z') : null,
         createdAt: now,
         updatedAt: now,
       })
@@ -141,6 +125,98 @@ export class GroupMemberService {
     await this.recalculateGroupTotals(groupId, now);
 
     return this.findMemberWithPerson(member.id);
+  }
+
+  async reorderMembers(groupId: string, dto: ReorderMembersDto) {
+    await this.assertGroupExists(groupId);
+    await this.assertTurnsNotInitialized(groupId);
+
+    const items = dto.members;
+
+    // Validate: no duplicate turnOrders in payload
+    const incomingOrders = items.map((i) => i.turnOrder);
+    const uniqueOrders = new Set(incomingOrders);
+    if (uniqueOrders.size !== incomingOrders.length) {
+      throw new ConflictException('Duplicate turnOrder values in payload');
+    }
+
+    // Fetch all active slots for this group, sorted by current turnOrder
+    const existing = await this.db
+      .select({ id: groupMember.id, personId: groupMember.personId, turnOrder: groupMember.turnOrder })
+      .from(groupMember)
+      .where(and(eq(groupMember.groupId, groupId), isNull(groupMember.deletedAt), eq(groupMember.status, 'ACTIVE')))
+      .orderBy(groupMember.turnOrder);
+
+    if (items.length !== existing.length) {
+      throw new BadRequestException(
+        `Payload has ${items.length} items but group has ${existing.length} active slots`,
+      );
+    }
+
+    // Validate all personIds are active members of this group
+    const existingPersonIds = new Set(existing.map((m) => m.personId));
+    for (const item of items) {
+      if (!existingPersonIds.has(item.personId)) {
+        throw new NotFoundException(`Person ${item.personId} is not an active member of this group`);
+      }
+    }
+
+    // Build slot → new turnOrder mapping.
+    // For multi-slot persons: match i-th slot (sorted by current turnOrder) to
+    // i-th turnOrder assigned to that person in the payload (in order of appearance).
+    const payloadByPerson = new Map<string, number[]>();
+    for (const item of items) {
+      if (!payloadByPerson.has(item.personId)) payloadByPerson.set(item.personId, []);
+      payloadByPerson.get(item.personId)!.push(item.turnOrder);
+    }
+
+    // Validate slot count per person matches
+    const existingByPerson = new Map<string, typeof existing>();
+    for (const slot of existing) {
+      if (!existingByPerson.has(slot.personId)) existingByPerson.set(slot.personId, []);
+      existingByPerson.get(slot.personId)!.push(slot);
+    }
+
+    for (const [personId, newOrders] of payloadByPerson) {
+      const slots = existingByPerson.get(personId) ?? [];
+      if (newOrders.length !== slots.length) {
+        throw new BadRequestException(
+          `Person ${personId} has ${slots.length} slot(s) but payload provides ${newOrders.length} turnOrder(s)`,
+        );
+      }
+    }
+
+    // Build update list: slot.id → newTurnOrder
+    const updates: Array<{ id: string; turnOrder: number }> = [];
+    const usedIndexByPerson = new Map<string, number>();
+
+    for (const slot of existing) {
+      const idx = usedIndexByPerson.get(slot.personId) ?? 0;
+      const newOrder = payloadByPerson.get(slot.personId)![idx];
+      updates.push({ id: slot.id, turnOrder: newOrder });
+      usedIndexByPerson.set(slot.personId, idx + 1);
+    }
+
+    // Apply atomically: use a temp offset to avoid unique constraint violations mid-update
+    const now = new Date();
+    await this.db.transaction(async (tx) => {
+      // Shift all current turnOrders to a high temp range to avoid conflicts
+      for (const slot of existing) {
+        await tx
+          .update(groupMember)
+          .set({ turnOrder: slot.turnOrder + 10000, updatedAt: now })
+          .where(eq(groupMember.id, slot.id));
+      }
+      // Apply final values
+      for (const u of updates) {
+        await tx
+          .update(groupMember)
+          .set({ turnOrder: u.turnOrder, updatedAt: now })
+          .where(eq(groupMember.id, u.id));
+      }
+    });
+
+    return this.listMembers(groupId);
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────

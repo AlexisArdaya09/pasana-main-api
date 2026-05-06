@@ -5,3 +5,4 @@ export const groupStatusEnum = pgEnum('group_status', ['ACTIVE', 'COMPLETED', 'P
 export const memberStatusEnum = pgEnum('member_status', ['ACTIVE', 'INACTIVE']);
 export const turnStatusEnum = pgEnum('turn_status', ['PENDING', 'ACTIVE', 'COMPLETED']);
 export const paymentStatusEnum = pgEnum('payment_status', ['PENDING', 'PAID']);
+export const paymentMethodEnum = pgEnum('payment_method', ['CASH', 'QR']);

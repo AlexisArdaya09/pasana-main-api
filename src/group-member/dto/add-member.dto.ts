@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsOptional, IsPositive, IsString } from 'class-validator';
+import { IsDateString, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString } from 'class-validator';
 
 export class AddMemberDto {
   @ApiProperty({ description: 'ID de la persona a agregar' })
@@ -19,4 +19,16 @@ export class AddMemberDto {
   @IsInt()
   @IsPositive()
   turnOrder?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Fecha personalizada para este slot (YYYY-MM-DD). ' +
+      'BIRTHDAY: reemplaza person.birthday como base para calcular el próximo cumpleaños. ' +
+      'WEEKLY/MONTHLY: se usa directamente como scheduledDate de este turno, ignorando el orden automático. ' +
+      'Si no se envía, se usa la fecha de nacimiento de la persona (BIRTHDAY) o el cálculo automático desde startDate.',
+    example: '1994-09-02',
+  })
+  @IsOptional()
+  @IsDateString()
+  customDate?: string;
 }

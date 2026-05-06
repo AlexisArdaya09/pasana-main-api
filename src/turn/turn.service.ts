@@ -29,6 +29,7 @@ export interface ParticipantPaymentInfo {
   turnOrder: number;
   paymentId: string | null;
   amount: number | null;
+  method: 'CASH' | 'QR' | null;
   paidAt: Date | null;
 }
 
@@ -121,6 +122,7 @@ export class TurnService {
         turnOrder: groupMember.turnOrder,
         paymentId: payment.id,
         amount: payment.amount,
+        method: payment.method,
         paidAt: payment.paidAt,
         paymentStatus: payment.status,
       })
@@ -128,7 +130,7 @@ export class TurnService {
       .innerJoin(person, eq(groupMember.personId, person.id))
       .leftJoin(
         payment,
-        and(eq(payment.turnId, turnId), eq(payment.participantId, groupMember.personId)),
+        and(eq(payment.turnId, turnId), eq(payment.participantId, groupMember.id)),
       )
       .where(
         and(eq(groupMember.groupId, t.turn.groupId), eq(groupMember.status, 'ACTIVE')),
@@ -146,6 +148,7 @@ export class TurnService {
         turnOrder: m.turnOrder,
         paymentId: m.paymentId ?? null,
         amount: m.amount != null ? parseFloat(m.amount) : null,
+        method: m.method ?? null,
         paidAt: m.paidAt ?? null,
       };
 

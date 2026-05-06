@@ -36,6 +36,34 @@
       "when": 1746308400000,
       "tag": "0004_add_group_participant_count_total",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1746394800000,
+      "tag": "0005_group_member_multi_turn",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1746481200000,
+      "tag": "0006_rename_custom_birthday_to_custom_date",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1746567600000,
+      "tag": "0007_payment_participant_by_slot",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1746654000000,
+      "tag": "0008_add_payment_method",
+      "breakpoints": true
     }
   ]
 }

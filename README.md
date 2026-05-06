@@ -148,9 +148,9 @@ Un **pasanaco** es un grupo de ahorro rotativo. El flujo de vida es:
 
 | Frecuencia | Comportamiento |
 |------------|----------------|
-| `WEEKLY`   | Los turnos se espacian semanalmente desde la fecha de inicio |
-| `MONTHLY`  | Los turnos se espacian mensualmente desde la fecha de inicio |
-| `BIRTHDAY` | Fecha de nacimiento — cada turno cae en el próximo cumpleaños del beneficiario a partir de la fecha de inicio. Los turnos se ordenan por fecha de cumpleaños (ascendente); `turnOrder` se usa solo como desempate cuando dos personas comparten la misma fecha |
+| `WEEKLY`   | Los turnos se espacian semanalmente desde la fecha de inicio. Si el slot tiene `customDate`, se usa directamente como `scheduledDate` |
+| `MONTHLY`  | Los turnos se espacian mensualmente desde la fecha de inicio. Si el slot tiene `customDate`, se usa directamente como `scheduledDate` |
+| `BIRTHDAY` | Cada turno cae en el próximo cumpleaños del beneficiario a partir de la fecha de inicio. `customDate` reemplaza `person.birthday` como base de cálculo (útil para múltiples slots por persona con fechas distintas). Los turnos se ordenan por fecha ASC; `turnOrder` se usa solo como desempate |
 
 ### Fechas de inicio y fin
 
@@ -231,6 +231,9 @@ Un **pasanaco** es un grupo de ahorro rotativo. El flujo de vida es:
 |-------|------|-----------|-------------|
 | `personId` | string | ✓ | ID de la persona |
 | `turnOrder` | number | — | Posición en el orden (1 = primero). Se auto-asigna al final si no se envía. Para grupos BIRTHDAY actúa solo como desempate |
+| `customDate` | string (YYYY-MM-DD) | — | Fecha personalizada para este slot. **BIRTHDAY:** reemplaza `person.birthday` como base para calcular el próximo cumpleaños. **WEEKLY/MONTHLY:** se usa directamente como `scheduledDate`, ignorando el cálculo automático por offset. Útil cuando una persona tiene múltiples turnos con fechas distintas |
+
+> Una misma persona puede tener múltiples slots en el mismo grupo con distintos `customDate`.
 
 Todos los endpoints de miembros devuelven `{ member, person }`:
 
@@ -287,9 +290,11 @@ Todos los endpoints de miembros devuelven `{ member, person }`:
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
 | `turnId` | string | ✓ | ID del turno (debe estar `ACTIVE`) |
-| `participantId` | string | ✓ | ID de la persona que paga |
+| `participantId` | string | ✓ | ID de la persona que paga (`person.id`) |
+| `turnOrder` | number | ✓ | Número de orden del slot (`group_member.turnOrder`). Identifica cuál de los slots de la persona está pagando |
+| `method` | `CASH` \| `QR` | ✓ | Método de pago: efectivo o QR |
 
-> El monto se toma automáticamente de `contributionAmount` del grupo. Cuando se alcanza el `totalExpectedAmount`, el turno pasa a `COMPLETED`, el siguiente turno pasa a `ACTIVE` y, si era el último, el grupo pasa a `COMPLETED`.
+> `participantId + turnOrder` identifican el slot exacto (`group_member`). Una persona con dos slots debe hacer dos llamadas con distinto `turnOrder`. El monto se toma de `contributionAmount` del grupo. Cuando se alcanza `totalExpectedAmount`, el turno pasa a `COMPLETED`, el siguiente a `ACTIVE`, y si era el último, el grupo pasa a `COMPLETED`.
 
 ### Persons
 
@@ -397,7 +402,7 @@ npm run db:migrate:prod  # Migraciones contra prod
 | `person` | Datos personales. Campos únicos: `phone`, `email` |
 | `user_account` | Cuenta de acceso. `person_id` nullable (cuenta standalone). Campos únicos: `username`, `email` |
 | `group` | Pasanaco. `participant_count` y `total_amount_per_turn` se recalculan al modificar miembros. `start_date`/`end_date` se calculan al inicializar turnos |
-| `group_member` | Relación persona ↔ grupo. `turn_order` define posición (o desempate en BIRTHDAY) |
+| `group_member` | Relación persona ↔ grupo. `turn_order` define posición (o desempate en BIRTHDAY). `custom_date` permite fijar una fecha específica por slot (reemplaza birthday en BIRTHDAY; actúa como scheduledDate exacto en WEEKLY/MONTHLY) |
 | `turn` | Un turno por miembro activo. Incluye `beneficiary` (join a `person`). `status`: PENDING → ACTIVE → COMPLETED |
 | `payment` | Pago de un participante en un turno. Índice único `(turn_id, participant_id)` |
 

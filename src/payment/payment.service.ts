@@ -59,14 +59,15 @@ export class PaymentService {
         );
       }
 
-      // ── 2. Validate participant belongs to this group ─────────────────────
+      // ── 2. Resolve exact slot by (personId + turnOrder + groupId) ──────────
       const [member] = await tx
         .select()
         .from(groupMember)
         .where(
           and(
-            eq(groupMember.groupId, lockedTurn.groupId),
             eq(groupMember.personId, dto.participantId),
+            eq(groupMember.turnOrder, dto.turnOrder),
+            eq(groupMember.groupId, lockedTurn.groupId),
             eq(groupMember.status, 'ACTIVE'),
             isNull(groupMember.deletedAt),
           ),
@@ -75,25 +76,25 @@ export class PaymentService {
 
       if (!member) {
         throw new NotFoundException(
-          `Participant ${dto.participantId} is not an active member of this group`,
+          `No active slot found for person ${dto.participantId} with turnOrder ${dto.turnOrder} in this group`,
         );
       }
 
-      // ── 3. Check for duplicate payment ───────────────────────────────────
+      // ── 3. Check for duplicate payment (per slot, not per person) ────────
       const [existing] = await tx
         .select({ id: payment.id, status: payment.status })
         .from(payment)
         .where(
           and(
             eq(payment.turnId, dto.turnId),
-            eq(payment.participantId, dto.participantId),
+            eq(payment.participantId, member.id),
           ),
         )
         .limit(1);
 
       if (existing?.status === 'PAID') {
         throw new ConflictException(
-          `Participant ${dto.participantId} already paid for turn ${dto.turnId}`,
+          `Slot turnOrder=${dto.turnOrder} for person ${dto.participantId} already paid for turn ${dto.turnId}`,
         );
       }
 
@@ -113,9 +114,10 @@ export class PaymentService {
         .values({
           id: createId(),
           turnId: dto.turnId,
-          participantId: dto.participantId,
+          participantId: member.id,
           amount: amount.toFixed(2),
           status: 'PAID',
+          method: dto.method,
           paidAt: now,
           createdAt: now,
           updatedAt: now,

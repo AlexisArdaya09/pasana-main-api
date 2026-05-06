@@ -2,8 +2,8 @@ import { numeric, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-c
 import { baseSchema } from '../base/base.schema';
 import { BaseTableType } from '../base/base.types';
 import { turn } from '../turn/turn.schema';
-import { person } from '../person/person.schema';
-import { paymentStatusEnum } from '../enums';
+import { groupMember } from '../group-member/group-member.schema';
+import { paymentMethodEnum, paymentStatusEnum } from '../enums';
 
 export const payment = pgTable(
   'payment',
@@ -12,11 +12,14 @@ export const payment = pgTable(
     turnId: text('turn_id')
       .notNull()
       .references(() => turn.id),
+    // References group_member.id (slot), not person.id — allows a person with
+    // multiple slots to pay once per slot per turn.
     participantId: text('participant_id')
       .notNull()
-      .references(() => person.id),
+      .references(() => groupMember.id),
     amount: numeric('amount', { precision: 12, scale: 2 }).notNull(),
     status: paymentStatusEnum('status').notNull().default('PENDING'),
+    method: paymentMethodEnum('method').notNull(),
     paidAt: timestamp('paid_at'),
   },
   (t) => [
@@ -30,5 +33,6 @@ export type Payment = BaseTableType & {
   participantId: string;
   amount: string; // numeric → string
   status: 'PENDING' | 'PAID';
+  method: 'CASH' | 'QR';
   paidAt: Date | null;
 };

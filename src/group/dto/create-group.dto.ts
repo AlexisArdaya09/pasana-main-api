@@ -32,11 +32,12 @@ export class CreateGroupDto {
   @IsEnum(Frequency)
   frequency: Frequency;
 
-  @ApiProperty({
-    description: 'Monto que cada participante aporta por turno',
+  @ApiPropertyOptional({
+    description: 'Monto que cada participante aporta por turno. Puede establecerse luego con PATCH.',
     example: 1000,
   })
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @IsPositive()
-  contributionAmount: number;
+  contributionAmount?: number;
 }

@@ -103,7 +103,7 @@ export class GroupService {
         name: dto.name,
         description: dto.description ?? null,
         frequency: dto.frequency,
-        contributionAmount: dto.contributionAmount.toFixed(2),
+        contributionAmount: dto.contributionAmount != null ? dto.contributionAmount.toFixed(2) : '0',
         status: 'ACTIVE',
         createdAt: now,
         updatedAt: now,
@@ -189,6 +189,7 @@ export class GroupService {
         personId: groupMember.personId,
         turnOrder: groupMember.turnOrder,
         birthday: person.birthday,
+        customDate: groupMember.customDate,
         firstName: person.firstName,
         lastName: person.lastName,
       })
@@ -260,6 +261,7 @@ export class GroupService {
       personId: string;
       turnOrder: number;
       birthday: Date;
+      customDate: Date | null;
       firstName: string;
       lastName: string;
     }>,
@@ -275,14 +277,15 @@ export class GroupService {
       return this.orderByBirthday(rows, startDate);
     }
 
-    // WEEKLY / MONTHLY: respect manual turnOrder
+    // WEEKLY / MONTHLY: respect manual turnOrder; customDate overrides auto-calculated date
     const sorted = [...rows].sort((a, b) => a.turnOrder - b.turnOrder);
     return sorted.map((m, index) => ({
       personId: m.personId,
       firstName: m.firstName,
       lastName: m.lastName,
-      scheduledDate:
-        frequency === 'WEEKLY'
+      scheduledDate: m.customDate
+        ? m.customDate
+        : frequency === 'WEEKLY'
           ? addWeeks(startDate, index)
           : addMonths(startDate, index),
     }));
@@ -293,6 +296,7 @@ export class GroupService {
       personId: string;
       turnOrder: number;
       birthday: Date;
+      customDate: Date | null;
       firstName: string;
       lastName: string;
     }>,
@@ -303,13 +307,16 @@ export class GroupService {
     lastName: string;
     scheduledDate: Date;
   }> {
-    // Compute each member's next birthday from startDate
+    // Use customDate if set, otherwise fall back to person.birthday
     const withDates = rows.map((m) => ({
       ...m,
-      scheduledDate: nextBirthdayFrom(new Date(m.birthday), startDate),
+      scheduledDate: nextBirthdayFrom(
+        new Date(m.customDate ?? m.birthday),
+        startDate,
+      ),
     }));
 
-    // Sort by scheduledDate ASC; use turnOrder as tiebreaker for same birthday
+    // Sort by scheduledDate ASC; use turnOrder as tiebreaker for same date
     withDates.sort((a, b) => {
       const diff = a.scheduledDate.getTime() - b.scheduledDate.getTime();
       return diff !== 0 ? diff : a.turnOrder - b.turnOrder;

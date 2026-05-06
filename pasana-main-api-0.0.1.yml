@@ -224,6 +224,38 @@ paths:
           description: Person already member / turnOrder taken
       tags:
         - Group Members
+  /groups/{groupId}/members/reorder:
+    patch:
+      operationId: GroupMemberController_reorderMembers
+      summary: Reorder members (drag & drop)
+      description: >-
+        Replaces all turnOrder values atomically. Only works before turns are
+        initialized. A person with multiple slots must appear once per slot;
+        slots are matched in ascending turnOrder order.
+      parameters:
+        - name: groupId
+          required: true
+          in: path
+          description: Group ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReorderMembersDto'
+      responses:
+        '200':
+          description: Reordered OK — returns updated member list
+        '400':
+          description: Turns already initialized / payload size mismatch
+        '404':
+          description: Group or person not found
+        '409':
+          description: Duplicate turnOrder in payload
+      tags:
+        - Group Members
   /groups/{groupId}/members/{personId}:
     delete:
       operationId: GroupMemberController_removeMember
@@ -759,12 +791,13 @@ components:
           example: MONTHLY
         contributionAmount:
           type: number
-          description: Monto que cada participante aporta por turno
+          description: >-
+            Monto que cada participante aporta por turno. Puede establecerse
+            luego con PATCH.
           example: 1000
       required:
         - name
         - frequency
-        - contributionAmount
     InitializeTurnsDto:
       type: object
       properties:
@@ -792,7 +825,9 @@ components:
           example: MONTHLY
         contributionAmount:
           type: number
-          description: Monto que cada participante aporta por turno
+          description: >-
+            Monto que cada participante aporta por turno. Puede establecerse
+            luego con PATCH.
           example: 1000
     AddMemberDto:
       type: object
@@ -808,20 +843,73 @@ components:
             un desempate cuando dos personas comparten fecha de nacimiento. Si
             no se envía, se asigna automáticamente al final.
           example: 1
+        customDate:
+          type: string
+          description: >-
+            Fecha personalizada para este slot (YYYY-MM-DD). BIRTHDAY: reemplaza
+            person.birthday como base para calcular el próximo cumpleaños.
+            WEEKLY/MONTHLY: se usa directamente como scheduledDate de este
+            turno, ignorando el orden automático. Si no se envía, se usa la
+            fecha de nacimiento de la persona (BIRTHDAY) o el cálculo automático
+            desde startDate.
+          example: '1994-09-02'
       required:
         - personId
+    ReorderItemDto:
+      type: object
+      properties:
+        personId:
+          type: string
+          description: ID de la persona (person.id)
+        turnOrder:
+          type: number
+          description: Nuevo número de orden del slot
+          example: 1
+      required:
+        - personId
+        - turnOrder
+    ReorderMembersDto:
+      type: object
+      properties:
+        members:
+          description: >-
+            Lista completa de slots con su nuevo turnOrder. Una persona con
+            múltiples slots debe aparecer una vez por cada slot. El i-ésimo slot
+            de cada persona (ordenado por turnOrder actual) se asigna al i-ésimo
+            turnOrder enviado para esa persona.
+          type: array
+          items:
+            $ref: '#/components/schemas/ReorderItemDto'
+      required:
+        - members
     RegisterPaymentDto:
       type: object
       properties:
         participantId:
           type: string
-          description: ID del participante (person) que realiza el pago
+          description: ID de la persona que realiza el pago (person.id)
         turnId:
           type: string
           description: ID del turno activo
+        turnOrder:
+          type: number
+          description: >-
+            Número de orden del slot (group_member.turnOrder) que identifica
+            cuál de los slots de la persona está pagando. Requerido cuando una
+            persona tiene más de un slot en el grupo.
+          example: 1
+        method:
+          type: string
+          description: Método de pago
+          enum:
+            - CASH
+            - QR
+          example: CASH
       required:
         - participantId
         - turnId
+        - turnOrder
+        - method
     CreatePersonDto:
       type: object
       properties:

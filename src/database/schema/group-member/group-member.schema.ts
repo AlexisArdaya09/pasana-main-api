@@ -1,4 +1,4 @@
-import { integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import { date, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
 import { baseSchema } from '../base/base.schema';
 import { BaseTableType } from '../base/base.types';
 import { group } from '../group/group.schema';
@@ -17,9 +17,10 @@ export const groupMember = pgTable(
       .references(() => person.id),
     turnOrder: integer('turn_order').notNull(),
     status: memberStatusEnum('status').notNull().default('ACTIVE'),
+    // Optional date override per slot. BIRTHDAY: replaces person.birthday as base. WEEKLY/MONTHLY: used directly as scheduledDate.
+    customDate: date('custom_date', { mode: 'date' }),
   },
   (t) => [
-    uniqueIndex('uq_group_member_person').on(t.groupId, t.personId),
     uniqueIndex('uq_group_member_order').on(t.groupId, t.turnOrder),
   ],
 );
@@ -29,4 +30,5 @@ export type GroupMember = BaseTableType & {
   personId: string;
   turnOrder: number;
   status: 'ACTIVE' | 'INACTIVE';
+  customDate: Date | null;
 };

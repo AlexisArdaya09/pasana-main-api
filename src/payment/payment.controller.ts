@@ -1,7 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsInt, IsOptional, Min } from 'class-validator';
 import { PaymentService } from './payment.service';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 
@@ -32,8 +30,8 @@ export class PaymentController {
   @ApiResponse({ status: 200 })
   findByTurn(
     @Param('turnId') turnId: string,
-    @Query('page') @Type(() => Number) page = 0,
-    @Query('size') @Type(() => Number) size = 50,
+    @Query('page') page = 0,
+    @Query('size') size = 50,
   ) {
     return this.paymentService.findByTurn(turnId, Number(page), Number(size));
   }
