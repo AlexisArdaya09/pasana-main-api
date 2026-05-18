@@ -26,43 +26,64 @@
     {
       "idx": 3,
       "version": "7",
-      "when": 1746222000000,
+      "when": 1777747991765,
       "tag": "0003_drop_person_dni",
       "breakpoints": true
     },
     {
       "idx": 4,
       "version": "7",
-      "when": 1746308400000,
+      "when": 1777747991766,
       "tag": "0004_add_group_participant_count_total",
       "breakpoints": true
     },
     {
       "idx": 5,
       "version": "7",
-      "when": 1746394800000,
+      "when": 1777747991767,
       "tag": "0005_group_member_multi_turn",
       "breakpoints": true
     },
     {
       "idx": 6,
       "version": "7",
-      "when": 1746481200000,
+      "when": 1777747991768,
       "tag": "0006_rename_custom_birthday_to_custom_date",
       "breakpoints": true
     },
     {
       "idx": 7,
       "version": "7",
-      "when": 1746567600000,
+      "when": 1777747991769,
       "tag": "0007_payment_participant_by_slot",
       "breakpoints": true
     },
     {
       "idx": 8,
       "version": "7",
-      "when": 1746654000000,
+      "when": 1777747991770,
       "tag": "0008_add_payment_method",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777747991771,
+      "tag": "0009_renumber_turns_chronological",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777747991772,
+      "tag": "0010_group_delivery_date_strategy",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777747991773,
+      "tag": "0011_fix_pasanaco_data_all_groups",
       "breakpoints": true
     }
   ]

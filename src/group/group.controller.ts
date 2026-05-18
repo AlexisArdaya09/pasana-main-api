@@ -41,7 +41,9 @@ export class GroupController {
   @Post()
   @ApiOperation({
     summary: 'Create a new group',
-    description: 'Creates a group without dates. startDate and endDate are calculated automatically when turns are initialized.',
+    description:
+      'Creates a group without dates. Configure deliveryDateStrategy (SAME_DAY or DAYS_BEFORE). ' +
+      'startDate, endDate and per-turn deliveryDate are set when turns are initialized.',
   })
   @ApiResponse({ status: 201 })
   create(@Body() dto: CreateGroupDto) {

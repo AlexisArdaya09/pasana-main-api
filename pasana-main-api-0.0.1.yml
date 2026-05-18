@@ -57,6 +57,15 @@ paths:
       responses:
         '200':
           description: Paginated list of active groups
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Group'
       tags:
         - Groups
     post:
@@ -74,7 +83,11 @@ paths:
               $ref: '#/components/schemas/CreateGroupDto'
       responses:
         '201':
-          description: ''
+          description: Group created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
       tags:
         - Groups
   /groups/{id}:
@@ -90,7 +103,11 @@ paths:
             type: string
       responses:
         '200':
-          description: ''
+          description: Group found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
         '404':
           description: ''
       tags:
@@ -113,7 +130,11 @@ paths:
               $ref: '#/components/schemas/UpdateGroupDto'
       responses:
         '200':
-          description: ''
+          description: Group updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Group'
         '404':
           description: ''
       tags:
@@ -142,7 +163,10 @@ paths:
       description: >-
         Creates one turn per active member and activates the first one.
         Calculates and sets startDate (first turn) and endDate (last turn) on
-        the group. Call this once all members have been added.
+        the group. For each turn, persists scheduledDate (when the beneficiary
+        collects) and deliveryDate (deadline for others to deliver their
+        contribution) according to the group deliveryDateStrategy and
+        deliveryDaysBefore. Call this once all members have been added.
       parameters:
         - name: id
           required: true
@@ -159,6 +183,10 @@ paths:
       responses:
         '201':
           description: Turns created, group dates calculated, first turn activated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitializeTurnsResponse'
         '400':
           description: No members / turns already initialized
         '404':
@@ -256,6 +284,51 @@ paths:
           description: Duplicate turnOrder in payload
       tags:
         - Group Members
+  /groups/{groupId}/members/slots:
+    patch:
+      operationId: GroupMemberController_updateMemberSlot
+      summary: Update customDate for a member slot (pre-initialization)
+      description: >-
+        Updates customDate for a single slot identified by personId and
+        turnOrder. Only works before turns are initialized. Omit customDate or
+        send null to clear the override.
+      parameters:
+        - name: groupId
+          required: true
+          in: path
+          description: Group ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMemberSlotDto'
+            examples:
+              setCustomDate:
+                summary: Fijar fecha override
+                value:
+                  personId: uuid-de-la-persona
+                  turnOrder: 3
+                  customDate: '1994-09-02'
+              clearCustomDate:
+                summary: Limpiar override
+                value:
+                  personId: uuid-de-la-persona
+                  turnOrder: 3
+                  customDate: null
+      responses:
+        '200':
+          description: >-
+            Updated slot — same shape as GET /groups/:groupId/members item
+            ({ member, person })
+        '400':
+          description: Turns already initialized / invalid customDate
+        '404':
+          description: Group or slot (personId, turnOrder) not found
+      tags:
+        - Group Members
   /groups/{groupId}/members/{personId}:
     delete:
       operationId: GroupMemberController_removeMember
@@ -317,6 +390,15 @@ paths:
       responses:
         '200':
           description: Paginated list of turns
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TurnWithBeneficiary'
       tags:
         - Turns
   /turns/{id}:
@@ -332,7 +414,11 @@ paths:
             type: string
       responses:
         '200':
-          description: ''
+          description: Turn with beneficiary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnWithBeneficiary'
         '404':
           description: ''
       tags:
@@ -342,8 +428,11 @@ paths:
       operationId: TurnController_getSummary
       summary: Get full turn summary
       description: >-
-        Returns totalExpectedAmount, totalPaidAmount, percentagePaid,
-        participantsPaid[], participantsPending[]
+        Returns turn (with scheduledDate and deliveryDate), group summary,
+        payment progress, participantsPaid[] and participantsPending[].
+        Use turnOrder only to identify the slot in payment APIs — it is NOT the
+        pasanaco sequence number. For when a participant receives the pasanaco,
+        use beneficiaryTurnNumber and beneficiaryScheduledDate.
       parameters:
         - name: id
           required: true
@@ -353,7 +442,11 @@ paths:
             type: string
       responses:
         '200':
-          description: ''
+          description: Turn summary with paid/pending participants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnSummaryResponse'
         '404':
           description: ''
       tags:
@@ -403,6 +496,61 @@ paths:
           description: Turn or participant not found / not a member
         '409':
           description: Already paid for this turn
+      tags:
+        - Payments
+  /payments/batch:
+    post:
+      operationId: PaymentController_registerBatch
+      summary: Register multiple payments for an active turn (same method)
+      description: >-
+        All-or-nothing batch in a single DB transaction (FOR UPDATE on turn).
+        Rolls back if any slot is invalid or already paid. Updates
+        totalPaidAmount once; auto-completes turn when fully paid.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterBatchPaymentDto'
+            examples:
+              cashBatch:
+                summary: Cobro en efectivo a varios participantes
+                value:
+                  turnId: uuid-del-turno-activo
+                  method: CASH
+                  payments:
+                    - participantId: uuid-persona-1
+                      turnOrder: 1
+                    - participantId: uuid-persona-2
+                      turnOrder: 2
+      responses:
+        '201':
+          description: Batch processed (all-or-nothing)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterBatchPaymentResponse'
+              examples:
+                success:
+                  summary: Lote exitoso
+                  value:
+                    turnId: uuid-del-turno-activo
+                    method: CASH
+                    registered: 2
+                    failed: 0
+                    payments:
+                      - participantId: uuid-persona-1
+                        turnOrder: 1
+                        paymentId: uuid-pago-1
+                      - participantId: uuid-persona-2
+                        turnOrder: 2
+                        paymentId: uuid-pago-2
+        '400':
+          description: Invalid payload / turn not ACTIVE
+        '404':
+          description: Turn or slot not found
+        '409':
+          description: Conflict (all-or-nothing rollback)
       tags:
         - Payments
   /payments/turns/{turnId}:
@@ -773,12 +921,193 @@ tags: []
 servers: []
 components:
   schemas:
+    DeliveryDateStrategy:
+      type: string
+      enum:
+        - SAME_DAY
+        - DAYS_BEFORE
+      description: >-
+        SAME_DAY: deliveryDate = scheduledDate. DAYS_BEFORE: deliveryDate =
+        scheduledDate menos deliveryDaysBefore días calendario.
+    PersonBeneficiarySummary:
+      type: object
+      properties:
+        id:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+      required:
+        - id
+        - firstName
+        - lastName
+    Group:
+      type: object
+      description: Pasanaco (grupo de ahorro rotativo)
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        frequency:
+          type: string
+          enum:
+            - WEEKLY
+            - MONTHLY
+            - BIRTHDAY
+        contributionAmount:
+          type: string
+          description: Numeric string (decimal)
+        startDate:
+          type: string
+          format: date
+          nullable: true
+        endDate:
+          type: string
+          format: date
+          nullable: true
+        status:
+          type: string
+          enum:
+            - ACTIVE
+            - COMPLETED
+            - PAUSED
+        participantCount:
+          type: integer
+        totalAmountPerTurn:
+          type: string
+          description: Numeric string (decimal)
+        deliveryDateStrategy:
+          $ref: '#/components/schemas/DeliveryDateStrategy'
+        deliveryDaysBefore:
+          type: integer
+          nullable: true
+          description: >-
+            Días de antelación para deliveryDate. null si deliveryDateStrategy =
+            SAME_DAY.
+          minimum: 1
+          maximum: 365
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - frequency
+        - contributionAmount
+        - status
+        - participantCount
+        - totalAmountPerTurn
+        - deliveryDateStrategy
+    Turn:
+      type: object
+      description: Turno del pasanaco
+      properties:
+        id:
+          type: string
+        groupId:
+          type: string
+        turnNumber:
+          type: integer
+          description: Secuencia del pasanaco (1 = primero en cobrar)
+        beneficiaryId:
+          type: string
+        status:
+          type: string
+          enum:
+            - PENDING
+            - ACTIVE
+            - COMPLETED
+        totalExpectedAmount:
+          type: string
+          description: Numeric string (decimal)
+        totalPaidAmount:
+          type: string
+          description: Numeric string (decimal)
+        scheduledDate:
+          type: string
+          format: date
+          description: Fecha del turno — cuándo cobra el beneficiario (YYYY-MM-DD)
+          example: '2026-02-09'
+        deliveryDate:
+          type: string
+          format: date
+          description: >-
+            Fecha límite para que los demás entreguen su aporte (YYYY-MM-DD).
+            Calculada al inicializar según deliveryDateStrategy del grupo.
+          example: '2026-02-07'
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - groupId
+        - turnNumber
+        - beneficiaryId
+        - status
+        - totalExpectedAmount
+        - totalPaidAmount
+        - scheduledDate
+        - deliveryDate
+    TurnWithBeneficiary:
+      allOf:
+        - $ref: '#/components/schemas/Turn'
+        - type: object
+          properties:
+            beneficiary:
+              $ref: '#/components/schemas/PersonBeneficiarySummary'
+          required:
+            - beneficiary
+    GroupSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        contributionAmount:
+          type: string
+        frequency:
+          type: string
+          enum:
+            - WEEKLY
+            - MONTHLY
+            - BIRTHDAY
+    InitializeTurnsResponse:
+      type: object
+      properties:
+        group:
+          $ref: '#/components/schemas/Group'
+        turns:
+          type: array
+          items:
+            $ref: '#/components/schemas/TurnWithBeneficiary'
+        totalTurns:
+          type: integer
+        contributionAmount:
+          type: number
+        totalExpectedPerTurn:
+          type: number
     CreateGroupDto:
       type: object
       properties:
         name:
           type: string
-          example: Pasanaco Enero 2025
+          example: Pasanaco Febrero 2026
         description:
           type: string
           example: Grupo de ahorro mensual del equipo
@@ -794,10 +1123,22 @@ components:
           description: >-
             Monto que cada participante aporta por turno. Puede establecerse
             luego con PATCH.
-          example: 1000
+          example: 100
+        deliveryDateStrategy:
+          $ref: '#/components/schemas/DeliveryDateStrategy'
+          example: DAYS_BEFORE
+        deliveryDaysBefore:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: >-
+            Requerido si deliveryDateStrategy = DAYS_BEFORE. Ignorado o null si
+            SAME_DAY.
+          example: 2
       required:
         - name
         - frequency
+        - deliveryDateStrategy
     InitializeTurnsDto:
       type: object
       properties:
@@ -816,6 +1157,15 @@ components:
         description:
           type: string
           example: Grupo de ahorro mensual del equipo
+        deliveryDateStrategy:
+          $ref: '#/components/schemas/DeliveryDateStrategy'
+        deliveryDaysBefore:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: >-
+            Requerido si deliveryDateStrategy = DAYS_BEFORE. Solo editable antes
+            de inicializar turnos.
         frequency:
           type: string
           enum:
@@ -882,6 +1232,120 @@ components:
             $ref: '#/components/schemas/ReorderItemDto'
       required:
         - members
+    UpdateMemberSlotDto:
+      type: object
+      properties:
+        personId:
+          type: string
+          format: uuid
+          description: ID de la persona (person.id)
+        turnOrder:
+          type: number
+          description: Número de orden del slot a actualizar (group_member.turnOrder)
+          example: 3
+        customDate:
+          type: string
+          format: date
+          nullable: true
+          description: >-
+            YYYY-MM-DD. BIRTHDAY reemplaza person.birthday como base del próximo
+            cumpleaños. WEEKLY/MONTHLY se usa como scheduledDate al inicializar.
+            null u omitir limpia el override.
+          example: '1994-09-02'
+      required:
+        - personId
+        - turnOrder
+    ParticipantPaymentInfo:
+      type: object
+      description: >-
+        Participante en el resumen de cobro del turno activo. No confundir
+        turnOrder con la secuencia del pasanaco ni con la fecha de entrega.
+      properties:
+        memberId:
+          type: string
+          description: group_member.id (referencia interna del slot)
+        personId:
+          type: string
+          description: person.id
+        firstName:
+          type: string
+        lastName:
+          type: string
+        turnOrder:
+          type: integer
+          description: >-
+            Identificador del slot (group_member.turn_order). Usar en POST
+            /payments y POST /payments/batch junto con participantId. NO es el
+            número de turno del pasanaco ni la fecha de entrega del aporte.
+          example: 8
+        beneficiaryTurnNumber:
+          type: integer
+          nullable: true
+          description: >-
+            Número de turno (turn.turnNumber) en el que este slot cobra el
+            pasanaco como beneficiario.
+          example: 8
+        beneficiaryScheduledDate:
+          type: string
+          format: date
+          nullable: true
+          description: >-
+            Fecha en que este slot cobra el pasanaco (turn.scheduledDate del
+            turno beneficiario). NO es la fecha límite de entrega del aporte del
+            turno activo; para eso ver turn.deliveryDate en el turno que se está
+            cobrando.
+          example: '2026-04-29'
+        paymentId:
+          type: string
+          nullable: true
+        amount:
+          type: number
+          nullable: true
+        method:
+          type: string
+          enum:
+            - CASH
+            - QR
+          nullable: true
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+    TurnSummaryResponse:
+      type: object
+      properties:
+        turn:
+          allOf:
+            - $ref: '#/components/schemas/Turn'
+            - type: object
+              properties:
+                beneficiary:
+                  $ref: '#/components/schemas/PersonBeneficiarySummary'
+        group:
+          $ref: '#/components/schemas/GroupSummary'
+        totalExpectedAmount:
+          type: number
+        totalPaidAmount:
+          type: number
+        percentagePaid:
+          type: number
+        participantsPaid:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParticipantPaymentInfo'
+        participantsPending:
+          type: array
+          description: Ordenados por apellido y nombre. Pendientes de pagar el turno activo.
+          items:
+            $ref: '#/components/schemas/ParticipantPaymentInfo'
+      required:
+        - turn
+        - group
+        - totalExpectedAmount
+        - totalPaidAmount
+        - percentagePaid
+        - participantsPaid
+        - participantsPending
     RegisterPaymentDto:
       type: object
       properties:
@@ -910,6 +1374,95 @@ components:
         - turnId
         - turnOrder
         - method
+    BatchPaymentItemDto:
+      type: object
+      properties:
+        participantId:
+          type: string
+          description: ID de la persona (person.id)
+        turnOrder:
+          type: number
+          example: 1
+      required:
+        - participantId
+        - turnOrder
+    RegisterBatchPaymentDto:
+      type: object
+      properties:
+        turnId:
+          type: string
+          description: ID del turno (debe estar ACTIVE)
+        method:
+          type: string
+          enum:
+            - CASH
+            - QR
+          example: CASH
+        payments:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/BatchPaymentItemDto'
+      required:
+        - turnId
+        - method
+        - payments
+    BatchPaymentResultItemDto:
+      type: object
+      properties:
+        participantId:
+          type: string
+        turnOrder:
+          type: number
+        paymentId:
+          type: string
+    BatchPaymentErrorItemDto:
+      type: object
+      properties:
+        participantId:
+          type: string
+        turnOrder:
+          type: number
+        code:
+          type: string
+          example: ALREADY_PAID
+        message:
+          type: string
+    RegisterBatchPaymentResponse:
+      type: object
+      description: Resultado de POST /payments/batch (política todo-o-nada)
+      properties:
+        turnId:
+          type: string
+          description: ID del turno cobrado
+        method:
+          type: string
+          enum:
+            - CASH
+            - QR
+        registered:
+          type: integer
+          description: Pagos registrados exitosamente en el lote
+        failed:
+          type: integer
+          description: >-
+            Pagos fallidos (0 en política todo-o-nothing; >0 solo si en el
+            futuro se habilita modo parcial)
+        payments:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchPaymentResultItemDto'
+        errors:
+          type: array
+          description: Errores por ítem (modo parcial futuro; vacío en todo-o-nada)
+          items:
+            $ref: '#/components/schemas/BatchPaymentErrorItemDto'
+      required:
+        - turnId
+        - method
+        - registered
+        - failed
+        - payments
     CreatePersonDto:
       type: object
       properties:

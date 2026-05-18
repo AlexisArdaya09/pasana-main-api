@@ -4,7 +4,10 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { createId } from '@paralleldrive/cuid2';
 import { group, groupMember, person, turn } from '../database/schema';
 import { createOffsetPage, OffsetPage } from '../common/pagination/offset-page';
-import { CreateGroupDto } from './dto/create-group.dto';
+import { computeDeliveryDate, utcDateOnly } from '../common/date/calendar-date';
+import { mapGroupForResponse } from './group.mapper';
+import { mapTurnForResponse } from '../turn/turn.mapper';
+import { CreateGroupDto, DeliveryDateStrategy } from './dto/create-group.dto';
 import { UpdateGroupDto } from './dto/update-group.dto';
 import { GroupSortBy, ListGroupsQueryDto, SortOrder } from './dto/list-groups.query';
 import { InitializeTurnsDto } from './dto/initialize-turns.dto';
@@ -80,7 +83,12 @@ export class GroupService {
       this.db.select({ total: count() }).from(group).where(where),
     ]);
 
-    return createOffsetPage(content, Number(total), page, size);
+    return createOffsetPage(
+      content.map(mapGroupForResponse),
+      Number(total),
+      page,
+      size,
+    );
   }
 
   async findOne(id: string) {
@@ -91,10 +99,14 @@ export class GroupService {
       .limit(1);
 
     if (!found) throw new NotFoundException(`Group ${id} not found`);
-    return found;
+    return mapGroupForResponse(found);
   }
 
   async create(dto: CreateGroupDto) {
+    const delivery = this.resolveDeliveryConfig(
+      dto.deliveryDateStrategy,
+      dto.deliveryDaysBefore,
+    );
     const now = new Date();
     const [created] = await this.db
       .insert(group)
@@ -104,12 +116,14 @@ export class GroupService {
         description: dto.description ?? null,
         frequency: dto.frequency,
         contributionAmount: dto.contributionAmount != null ? dto.contributionAmount.toFixed(2) : '0',
+        deliveryDateStrategy: delivery.deliveryDateStrategy,
+        deliveryDaysBefore: delivery.deliveryDaysBefore,
         status: 'ACTIVE',
         createdAt: now,
         updatedAt: now,
       })
       .returning();
-    return created;
+    return mapGroupForResponse(created);
   }
 
   async update(id: string, dto: UpdateGroupDto) {
@@ -119,6 +133,15 @@ export class GroupService {
       throw new BadRequestException('Cannot update a completed group');
     }
 
+    const changesDeliveryOrFrequency =
+      dto.frequency !== undefined ||
+      dto.deliveryDateStrategy !== undefined ||
+      dto.deliveryDaysBefore !== undefined;
+
+    if (changesDeliveryOrFrequency) {
+      await this.assertTurnsNotInitialized(id);
+    }
+
     const patch: Partial<typeof group.$inferInsert> = { updatedAt: new Date() };
     if (dto.name !== undefined) patch.name = dto.name;
     if (dto.description !== undefined) patch.description = dto.description;
@@ -126,12 +149,27 @@ export class GroupService {
     if (dto.contributionAmount !== undefined)
       patch.contributionAmount = dto.contributionAmount.toFixed(2);
 
+    if (
+      dto.deliveryDateStrategy !== undefined ||
+      dto.deliveryDaysBefore !== undefined
+    ) {
+      const strategy =
+        dto.deliveryDateStrategy ?? existing.deliveryDateStrategy;
+      const daysBefore =
+        dto.deliveryDaysBefore !== undefined
+          ? dto.deliveryDaysBefore
+          : existing.deliveryDaysBefore;
+      const delivery = this.resolveDeliveryConfig(strategy, daysBefore ?? undefined);
+      patch.deliveryDateStrategy = delivery.deliveryDateStrategy;
+      patch.deliveryDaysBefore = delivery.deliveryDaysBefore;
+    }
+
     const [updated] = await this.db
       .update(group)
       .set(patch)
       .where(eq(group.id, id))
       .returning();
-    return updated;
+    return mapGroupForResponse(updated);
   }
 
   async softDelete(id: string) {
@@ -220,7 +258,12 @@ export class GroupService {
       status: (index === 0 ? 'ACTIVE' : 'PENDING') as 'ACTIVE' | 'PENDING',
       totalExpectedAmount: totalExpected,
       totalPaidAmount: '0.00',
-      scheduledDate: entry.scheduledDate,
+      scheduledDate: utcDateOnly(entry.scheduledDate),
+      deliveryDate: computeDeliveryDate(
+        utcDateOnly(entry.scheduledDate),
+        g.deliveryDateStrategy,
+        g.deliveryDaysBefore,
+      ),
       completedAt: null,
       createdAt: now,
       updatedAt: now,
@@ -239,9 +282,9 @@ export class GroupService {
       .returning();
 
     return {
-      group: updatedGroup,
+      group: mapGroupForResponse(updatedGroup),
       turns: createdTurns.map((t, i) => ({
-        ...t,
+        ...mapTurnForResponse(t),
         beneficiary: {
           personId: orderedMembers[i].personId,
           firstName: orderedMembers[i].firstName,
@@ -255,6 +298,37 @@ export class GroupService {
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────
+
+  private resolveDeliveryConfig(
+    strategy: DeliveryDateStrategy | 'SAME_DAY' | 'DAYS_BEFORE',
+    daysBefore?: number,
+  ): {
+    deliveryDateStrategy: 'SAME_DAY' | 'DAYS_BEFORE';
+    deliveryDaysBefore: number | null;
+  } {
+    if (strategy === DeliveryDateStrategy.SAME_DAY || strategy === 'SAME_DAY') {
+      return { deliveryDateStrategy: 'SAME_DAY', deliveryDaysBefore: null };
+    }
+    if (daysBefore == null || daysBefore < 1) {
+      throw new BadRequestException(
+        'deliveryDaysBefore is required and must be >= 1 when deliveryDateStrategy is DAYS_BEFORE',
+      );
+    }
+    return { deliveryDateStrategy: 'DAYS_BEFORE', deliveryDaysBefore: daysBefore };
+  }
+
+  private async assertTurnsNotInitialized(groupId: string) {
+    const [existing] = await this.db
+      .select({ id: turn.id })
+      .from(turn)
+      .where(eq(turn.groupId, groupId))
+      .limit(1);
+    if (existing) {
+      throw new BadRequestException(
+        'Cannot change frequency or delivery date strategy after turns have been initialized',
+      );
+    }
+  }
 
   private orderMembersForTurns(
     rows: Array<{
@@ -277,17 +351,33 @@ export class GroupService {
       return this.orderByBirthday(rows, startDate);
     }
 
-    // WEEKLY / MONTHLY: respect manual turnOrder; customDate overrides auto-calculated date
+    // WEEKLY / MONTHLY: customDate overrides auto offset; when any customDate exists,
+    // order turns chronologically (same as BIRTHDAY) so turn_number matches delivery sequence.
     const sorted = [...rows].sort((a, b) => a.turnOrder - b.turnOrder);
-    return sorted.map((m, index) => ({
+    const withDates = sorted.map((m, index) => ({
       personId: m.personId,
       firstName: m.firstName,
       lastName: m.lastName,
+      turnOrder: m.turnOrder,
       scheduledDate: m.customDate
         ? m.customDate
         : frequency === 'WEEKLY'
           ? addWeeks(startDate, index)
           : addMonths(startDate, index),
+    }));
+
+    if (rows.some((m) => m.customDate != null)) {
+      withDates.sort((a, b) => {
+        const diff = a.scheduledDate.getTime() - b.scheduledDate.getTime();
+        return diff !== 0 ? diff : a.turnOrder - b.turnOrder;
+      });
+    }
+
+    return withDates.map(({ personId, firstName, lastName, scheduledDate }) => ({
+      personId,
+      firstName,
+      lastName,
+      scheduledDate,
     }));
   }
 

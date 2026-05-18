@@ -1,12 +1,30 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { PaymentService } from './payment.service';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
+import { RegisterBatchPaymentDto } from './dto/register-batch-payment.dto';
 
 @ApiTags('Payments')
 @Controller('payments')
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
+
+  @Post('batch')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({
+    summary: 'Register multiple payments for an active turn (same method)',
+    description:
+      'All-or-nothing batch in a single DB transaction with FOR UPDATE on the turn. ' +
+      'Validates every slot before committing; rolls back on any error. ' +
+      'Updates totalPaidAmount once, then auto-completes the turn if fully paid.',
+  })
+  @ApiResponse({ status: 201, description: 'Batch processed' })
+  @ApiResponse({ status: 400, description: 'Invalid payload / turn not ACTIVE' })
+  @ApiResponse({ status: 404, description: 'Turn or slot not found' })
+  @ApiResponse({ status: 409, description: 'Duplicate slot in batch or already paid' })
+  registerBatch(@Body() dto: RegisterBatchPaymentDto) {
+    return this.paymentService.registerBatchPayment(dto);
+  }
 
   @Post()
   @ApiOperation({

@@ -11,6 +11,7 @@ import { createId } from '@paralleldrive/cuid2';
 import { group, groupMember, person, turn } from '../database/schema';
 import { AddMemberDto } from './dto/add-member.dto';
 import { ReorderMembersDto } from './dto/reorder-members.dto';
+import { UpdateMemberSlotDto } from './dto/update-member-slot.dto';
 
 @Injectable()
 export class GroupMemberService {
@@ -217,6 +218,43 @@ export class GroupMemberService {
     });
 
     return this.listMembers(groupId);
+  }
+
+  async updateMemberSlot(groupId: string, dto: UpdateMemberSlotDto) {
+    await this.assertGroupExists(groupId);
+    await this.assertTurnsNotInitialized(groupId);
+
+    const [slot] = await this.db
+      .select({ id: groupMember.id })
+      .from(groupMember)
+      .where(
+        and(
+          eq(groupMember.groupId, groupId),
+          eq(groupMember.personId, dto.personId),
+          eq(groupMember.turnOrder, dto.turnOrder),
+          isNull(groupMember.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (!slot) {
+      throw new NotFoundException(
+        `No slot found for person ${dto.personId} with turnOrder ${dto.turnOrder} in group ${groupId}`,
+      );
+    }
+
+    const customDate =
+      dto.customDate === undefined || dto.customDate === null
+        ? null
+        : new Date(dto.customDate + 'T12:00:00.000Z');
+
+    const now = new Date();
+    await this.db
+      .update(groupMember)
+      .set({ customDate, updatedAt: now })
+      .where(eq(groupMember.id, slot.id));
+
+    return this.findMemberWithPerson(slot.id);
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────

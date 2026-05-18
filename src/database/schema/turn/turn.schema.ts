@@ -38,6 +38,7 @@ export const turn = pgTable(
       .notNull()
       .default('0'),
     scheduledDate: date('scheduled_date', { mode: 'date' }).notNull(),
+    deliveryDate: date('delivery_date', { mode: 'date' }).notNull(),
     completedAt: timestamp('completed_at'),
   },
   (t) => [uniqueIndex('uq_turn_group_number').on(t.groupId, t.turnNumber)],
@@ -51,5 +52,6 @@ export type Turn = BaseTableType & {
   totalExpectedAmount: string; // numeric → string in Drizzle
   totalPaidAmount: string;
   scheduledDate: Date;
+  deliveryDate: Date;
   completedAt: Date | null;
 };

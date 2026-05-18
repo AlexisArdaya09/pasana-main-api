@@ -9,9 +9,13 @@ import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { group, groupMember, payment, person, turn } from '../database/schema';
 import { createOffsetPage, OffsetPage } from '../common/pagination/offset-page';
 import { ListTurnsQueryDto } from './dto/list-turns.query';
+import { formatDateOnly } from '../common/date/format-date-only';
+import { mapTurnForResponse } from './turn.mapper';
 
 export interface TurnSummary {
-  turn: typeof turn.$inferSelect & {
+  turn: Omit<typeof turn.$inferSelect, 'scheduledDate' | 'deliveryDate'> & {
+    scheduledDate: string;
+    deliveryDate: string;
     beneficiary: { id: string; firstName: string; lastName: string };
   };
   group: Pick<typeof group.$inferSelect, 'id' | 'name' | 'contributionAmount' | 'frequency'>;
@@ -23,10 +27,17 @@ export interface TurnSummary {
 }
 
 export interface ParticipantPaymentInfo {
+  /** group_member.id — use as participantId in payment APIs */
+  memberId: string;
   personId: string;
   firstName: string;
   lastName: string;
+  /** Slot order (group_member.turn_order); required for POST /payments and batch */
   turnOrder: number;
+  /** Turn when this slot receives the pasanaco (null if not linked) */
+  beneficiaryTurnNumber: number | null;
+  /** Delivery date for this slot's beneficiary turn */
+  beneficiaryScheduledDate: string | null;
   paymentId: string | null;
   amount: number | null;
   method: 'CASH' | 'QR' | null;
@@ -63,7 +74,10 @@ export class TurnService {
       this.db.select({ total: count() }).from(turn).where(where),
     ]);
 
-    const content = rows.map(({ turn: t, beneficiary }) => ({ ...t, beneficiary }));
+    const content = rows.map(({ turn: t, beneficiary }) => ({
+      ...mapTurnForResponse(t),
+      beneficiary,
+    }));
     return createOffsetPage(content, Number(total), page, size);
   }
 
@@ -83,7 +97,7 @@ export class TurnService {
       .limit(1);
 
     if (!row) throw new NotFoundException(`Turn ${id} not found`);
-    return { ...row.turn, beneficiary: row.beneficiary };
+    return { ...mapTurnForResponse(row.turn), beneficiary: row.beneficiary };
   }
 
   /**
@@ -113,10 +127,27 @@ export class TurnService {
 
     if (!t) throw new NotFoundException(`Turn ${turnId} not found`);
 
-    // All active members of the group with their payment status for this turn
+    const beneficiaryTurns = await this.db
+      .select({
+        turnNumber: turn.turnNumber,
+        beneficiaryId: turn.beneficiaryId,
+        scheduledDate: turn.scheduledDate,
+      })
+      .from(turn)
+      .where(and(eq(turn.groupId, t.turn.groupId), isNull(turn.deletedAt)));
+
+    const beneficiaryTurnByKey = new Map<string, { turnNumber: number; scheduledDate: Date }>();
+    for (const bt of beneficiaryTurns) {
+      const dateKey = formatDateOnly(bt.scheduledDate)!;
+      beneficiaryTurnByKey.set(`${bt.beneficiaryId}:${dateKey}`, bt);
+    }
+
+    // All active members with payment status for this turn (collection list)
     const members = await this.db
       .select({
+        memberId: groupMember.id,
         personId: groupMember.personId,
+        customDate: groupMember.customDate,
         firstName: person.firstName,
         lastName: person.lastName,
         turnOrder: groupMember.turnOrder,
@@ -134,18 +165,31 @@ export class TurnService {
       )
       .where(
         and(eq(groupMember.groupId, t.turn.groupId), eq(groupMember.status, 'ACTIVE')),
-      )
-      .orderBy(asc(groupMember.turnOrder));
+      );
 
     const participantsPaid: ParticipantPaymentInfo[] = [];
     const participantsPending: ParticipantPaymentInfo[] = [];
 
-    for (const m of members) {
+    const sortedMembers = [...members].sort((a, b) => {
+      const nameCmp = a.lastName.localeCompare(b.lastName, 'es');
+      return nameCmp !== 0 ? nameCmp : a.firstName.localeCompare(b.firstName, 'es');
+    });
+
+    for (const m of sortedMembers) {
+      const dateKey = m.customDate ? formatDateOnly(m.customDate) : null;
+      const beneficiaryTurn =
+        dateKey != null ? beneficiaryTurnByKey.get(`${m.personId}:${dateKey}`) : undefined;
+
       const info: ParticipantPaymentInfo = {
+        memberId: m.memberId,
         personId: m.personId,
         firstName: m.firstName,
         lastName: m.lastName,
         turnOrder: m.turnOrder,
+        beneficiaryTurnNumber: beneficiaryTurn?.turnNumber ?? null,
+        beneficiaryScheduledDate: beneficiaryTurn
+          ? formatDateOnly(beneficiaryTurn.scheduledDate)
+          : null,
         paymentId: m.paymentId ?? null,
         amount: m.amount != null ? parseFloat(m.amount) : null,
         method: m.method ?? null,
@@ -167,7 +211,7 @@ export class TurnService {
         : 0;
 
     return {
-      turn: { ...t.turn, beneficiary: t.beneficiary },
+      turn: { ...mapTurnForResponse(t.turn), beneficiary: t.beneficiary },
       group: t.group,
       totalExpectedAmount,
       totalPaidAmount,
@@ -222,7 +266,7 @@ export class TurnService {
         .select()
         .from(turn)
         .where(and(eq(turn.groupId, locked.groupId), eq(turn.status, 'PENDING')))
-        .orderBy(asc(turn.turnNumber))
+        .orderBy(asc(turn.scheduledDate), asc(turn.turnNumber))
         .limit(1);
 
       if (nextTurn) {
@@ -238,7 +282,7 @@ export class TurnService {
           .where(eq(group.id, locked.groupId));
       }
 
-      return completed;
+      return mapTurnForResponse(completed);
     });
   }
 }

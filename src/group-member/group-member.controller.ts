@@ -13,6 +13,7 @@ import { ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { GroupMemberService } from './group-member.service';
 import { AddMemberDto } from './dto/add-member.dto';
 import { ReorderMembersDto } from './dto/reorder-members.dto';
+import { UpdateMemberSlotDto } from './dto/update-member-slot.dto';
 
 @ApiTags('Group Members')
 @Controller('groups/:groupId/members')
@@ -54,6 +55,24 @@ export class GroupMemberController {
     @Body() dto: ReorderMembersDto,
   ) {
     return this.groupMemberService.reorderMembers(groupId, dto);
+  }
+
+  @Patch('slots')
+  @ApiOperation({
+    summary: 'Update customDate for a member slot (pre-initialization)',
+    description:
+      'Updates customDate for a single slot identified by personId and turnOrder. ' +
+      'Only works before turns are initialized. Omit customDate or send null to clear the override.',
+  })
+  @ApiParam({ name: 'groupId', description: 'Group ID' })
+  @ApiResponse({ status: 200, description: 'Updated slot — same shape as GET /groups/:groupId/members item' })
+  @ApiResponse({ status: 400, description: 'Turns already initialized / invalid customDate' })
+  @ApiResponse({ status: 404, description: 'Group or slot not found' })
+  updateMemberSlot(
+    @Param('groupId') groupId: string,
+    @Body() dto: UpdateMemberSlotDto,
+  ) {
+    return this.groupMemberService.updateMemberSlot(groupId, dto);
   }
 
   @Delete(':personId')

@@ -1,7 +1,7 @@
 import { date, integer, numeric, pgTable, varchar } from 'drizzle-orm/pg-core';
 import { baseSchema } from '../base/base.schema';
 import { BaseTableType } from '../base/base.types';
-import { frequencyEnum, groupStatusEnum } from '../enums';
+import { deliveryDateStrategyEnum, frequencyEnum, groupStatusEnum } from '../enums';
 
 export const group = pgTable('group', {
   ...baseSchema,
@@ -19,6 +19,10 @@ export const group = pgTable('group', {
   totalAmountPerTurn: numeric('total_amount_per_turn', { precision: 12, scale: 2 })
     .notNull()
     .default('0'),
+  deliveryDateStrategy: deliveryDateStrategyEnum('delivery_date_strategy')
+    .notNull()
+    .default('SAME_DAY'),
+  deliveryDaysBefore: integer('delivery_days_before'),
 });
 
 export type Group = BaseTableType & {
@@ -31,6 +35,8 @@ export type Group = BaseTableType & {
   status: 'ACTIVE' | 'COMPLETED' | 'PAUSED';
   participantCount: number;
   totalAmountPerTurn: string;
+  deliveryDateStrategy: 'SAME_DAY' | 'DAYS_BEFORE';
+  deliveryDaysBefore: number | null;
 };
 
 export type NewGroup = Omit<Group, keyof BaseTableType>;
