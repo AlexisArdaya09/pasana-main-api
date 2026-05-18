@@ -11,6 +11,7 @@ import { createOffsetPage, OffsetPage } from '../common/pagination/offset-page';
 import { ListTurnsQueryDto } from './dto/list-turns.query';
 import { formatDateOnly } from '../common/date/format-date-only';
 import { mapTurnForResponse } from './turn.mapper';
+import { completeActiveTurnAndAdvanceQueue } from '../payment/payment-turn.logic';
 
 export interface TurnSummary {
   turn: Omit<typeof turn.$inferSelect, 'scheduledDate' | 'deliveryDate'> & {
@@ -24,6 +25,30 @@ export interface TurnSummary {
   percentagePaid: number;
   participantsPaid: ParticipantPaymentInfo[];
   participantsPending: ParticipantPaymentInfo[];
+  nextTurn?: NextTurnSummary | null;
+  participantsAdvancePaid?: AdvancePaymentInfo[];
+}
+
+export interface NextTurnSummary {
+  id: string;
+  turnNumber: number;
+  status: string;
+  scheduledDate: string;
+  deliveryDate: string;
+  totalExpectedAmount: number;
+  totalPaidAmount: number;
+  beneficiary: { id: string; firstName: string; lastName: string };
+}
+
+export interface AdvancePaymentInfo {
+  personId: string;
+  firstName: string;
+  lastName: string;
+  turnOrder: number;
+  paymentId: string;
+  amount: number;
+  method: 'CASH' | 'QR';
+  paidAt: Date | null;
 }
 
 export interface ParticipantPaymentInfo {
@@ -161,7 +186,11 @@ export class TurnService {
       .innerJoin(person, eq(groupMember.personId, person.id))
       .leftJoin(
         payment,
-        and(eq(payment.turnId, turnId), eq(payment.participantId, groupMember.id)),
+        and(
+          eq(payment.turnId, turnId),
+          eq(payment.participantId, groupMember.id),
+          eq(payment.status, 'PAID'),
+        ),
       )
       .where(
         and(eq(groupMember.groupId, t.turn.groupId), eq(groupMember.status, 'ACTIVE')),
@@ -210,6 +239,80 @@ export class TurnService {
         ? Math.round((totalPaidAmount / totalExpectedAmount) * 100 * 100) / 100
         : 0;
 
+    let nextTurn: NextTurnSummary | null = null;
+    let participantsAdvancePaid: AdvancePaymentInfo[] = [];
+
+    if (t.turn.status === 'ACTIVE') {
+      const [nextRow] = await this.db
+        .select({
+          turn,
+          beneficiary: {
+            id: person.id,
+            firstName: person.firstName,
+            lastName: person.lastName,
+          },
+        })
+        .from(turn)
+        .innerJoin(person, eq(turn.beneficiaryId, person.id))
+        .where(
+          and(
+            eq(turn.groupId, t.turn.groupId),
+            eq(turn.status, 'PENDING'),
+            isNull(turn.deletedAt),
+          ),
+        )
+        .orderBy(asc(turn.scheduledDate), asc(turn.turnNumber))
+        .limit(1);
+
+      if (nextRow) {
+        const mapped = mapTurnForResponse(nextRow.turn);
+        nextTurn = {
+          id: mapped.id,
+          turnNumber: mapped.turnNumber,
+          status: mapped.status,
+          scheduledDate: mapped.scheduledDate,
+          deliveryDate: mapped.deliveryDate,
+          totalExpectedAmount: parseFloat(nextRow.turn.totalExpectedAmount),
+          totalPaidAmount: parseFloat(nextRow.turn.totalPaidAmount),
+          beneficiary: nextRow.beneficiary,
+        };
+
+        const advanceRows = await this.db
+          .select({
+            personId: person.id,
+            firstName: person.firstName,
+            lastName: person.lastName,
+            turnOrder: groupMember.turnOrder,
+            paymentId: payment.id,
+            amount: payment.amount,
+            method: payment.method,
+            paidAt: payment.paidAt,
+          })
+          .from(payment)
+          .innerJoin(groupMember, eq(payment.participantId, groupMember.id))
+          .innerJoin(person, eq(groupMember.personId, person.id))
+          .where(
+            and(
+              eq(payment.turnId, nextRow.turn.id),
+              eq(payment.status, 'PAID'),
+              isNull(payment.deletedAt),
+            ),
+          )
+          .orderBy(asc(person.lastName), asc(person.firstName));
+
+        participantsAdvancePaid = advanceRows.map((r) => ({
+          personId: r.personId,
+          firstName: r.firstName,
+          lastName: r.lastName,
+          turnOrder: r.turnOrder,
+          paymentId: r.paymentId,
+          amount: parseFloat(r.amount),
+          method: r.method,
+          paidAt: r.paidAt,
+        }));
+      }
+    }
+
     return {
       turn: { ...mapTurnForResponse(t.turn), beneficiary: t.beneficiary },
       group: t.group,
@@ -218,6 +321,8 @@ export class TurnService {
       percentagePaid,
       participantsPaid,
       participantsPending,
+      nextTurn,
+      participantsAdvancePaid,
     };
   }
 
@@ -255,32 +360,15 @@ export class TurnService {
 
       const now = new Date();
 
-      const [completed] = await tx
-        .update(turn)
-        .set({ status: 'COMPLETED', completedAt: now, updatedAt: now })
-        .where(eq(turn.id, turnId))
-        .returning();
+      await completeActiveTurnAndAdvanceQueue(tx, turnId, locked.groupId, now);
 
-      // Activate the next PENDING turn in this group
-      const [nextTurn] = await tx
+      const [completed] = await tx
         .select()
         .from(turn)
-        .where(and(eq(turn.groupId, locked.groupId), eq(turn.status, 'PENDING')))
-        .orderBy(asc(turn.scheduledDate), asc(turn.turnNumber))
+        .where(eq(turn.id, turnId))
         .limit(1);
 
-      if (nextTurn) {
-        await tx
-          .update(turn)
-          .set({ status: 'ACTIVE', updatedAt: now })
-          .where(eq(turn.id, nextTurn.id));
-      } else {
-        // All turns completed → mark group as COMPLETED
-        await tx
-          .update(group)
-          .set({ status: 'COMPLETED', updatedAt: now })
-          .where(eq(group.id, locked.groupId));
-      }
+      if (!completed) throw new NotFoundException(`Turn ${turnId} not found`);
 
       return mapTurnForResponse(completed);
     });

@@ -14,9 +14,7 @@ export class PaymentController {
   @ApiOperation({
     summary: 'Register multiple payments for an active turn (same method)',
     description:
-      'All-or-nothing batch in a single DB transaction with FOR UPDATE on the turn. ' +
-      'Validates every slot before committing; rolls back on any error. ' +
-      'Updates totalPaidAmount once, then auto-completes the turn if fully paid.',
+      'All-or-nothing batch for the ACTIVE turn only. Advance payments on the next PENDING turn use POST /payments.',
   })
   @ApiResponse({ status: 201, description: 'Batch processed' })
   @ApiResponse({ status: 400, description: 'Invalid payload / turn not ACTIVE' })
@@ -28,12 +26,16 @@ export class PaymentController {
 
   @Post()
   @ApiOperation({
-    summary: 'Register a payment for a participant in an active turn',
+    summary: 'Register a payment (active turn or advance on next pending turn)',
     description:
-      'Validates participant membership, prevents duplicate payments, updates totalPaidAmount atomically (FOR UPDATE lock). Auto-completes the turn and activates the next one when fully paid.',
+      'turnId = ACTIVE turn → current collection (auto-completes when fully paid). ' +
+      'turnId = immediately next PENDING turn → advance payment (increments that turn totalPaidAmount; does not activate it).',
   })
   @ApiResponse({ status: 201, description: 'Payment registered' })
-  @ApiResponse({ status: 400, description: 'Turn is not ACTIVE' })
+  @ApiResponse({
+    status: 400,
+    description: 'Turn is not ACTIVE nor the next PENDING / not immediate next',
+  })
   @ApiResponse({ status: 404, description: 'Turn or participant not found / not a member' })
   @ApiResponse({ status: 409, description: 'Already paid for this turn' })
   register(@Body() dto: RegisterPaymentDto) {
@@ -41,11 +43,14 @@ export class PaymentController {
   }
 
   @Get('turns/:turnId')
-  @ApiOperation({ summary: 'List payments for a turn' })
+  @ApiOperation({
+    summary: 'List payments for a turn',
+    description: 'Works for ACTIVE or PENDING turns (including advance payments).',
+  })
   @ApiParam({ name: 'turnId', description: 'Turn ID' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'size', required: false, type: Number })
-  @ApiResponse({ status: 200 })
+  @ApiResponse({ status: 200, description: 'Paginated payment list with personId and turnOrder' })
   findByTurn(
     @Param('turnId') turnId: string,
     @Query('page') page = 0,

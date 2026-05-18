@@ -8,10 +8,15 @@ import {
 import { and, asc, count, eq, isNull } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { createId } from '@paralleldrive/cuid2';
-import { group, groupMember, payment, turn } from '../database/schema';
+import { group, groupMember, payment, person, turn } from '../database/schema';
 import { createOffsetPage, OffsetPage } from '../common/pagination/offset-page';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { RegisterBatchPaymentDto } from './dto/register-batch-payment.dto';
+import { PaymentListItemDto } from './dto/payment-list-item.dto';
+import {
+  completeActiveTurnAndAdvanceQueue,
+  resolvePayableTurn,
+} from './payment-turn.logic';
 
 export interface RegisterPaymentResult {
   payment: typeof payment.$inferSelect;
@@ -24,6 +29,7 @@ export interface RegisterPaymentResult {
     percentagePaid: number;
     completedAt: Date | null;
   };
+  advancePayment: boolean;
   nextTurnActivated: boolean;
   groupCompleted: boolean;
 }
@@ -47,34 +53,13 @@ export class PaymentService {
   constructor(@Inject('DB_CONNECTION') private readonly db: NodePgDatabase) {}
 
   /**
-   * Registers a payment for a participant in an active turn.
-   *
-   * Concurrency strategy:
-   *   SELECT ... FOR UPDATE locks the turn row so only one transaction
-   *   can update totalPaidAmount at a time. The UNIQUE index on
-   *   (turn_id, participant_id) provides a second guard against duplicates.
+   * Registers a payment for the ACTIVE turn or an advance on the next PENDING turn.
    */
   async registerPayment(dto: RegisterPaymentDto): Promise<RegisterPaymentResult> {
     return this.db.transaction(async (tx) => {
-      // ── 1. Lock the turn row (prevents race conditions) ──────────────────
-      const [lockedTurn] = await tx
-        .select()
-        .from(turn)
-        .where(and(eq(turn.id, dto.turnId), isNull(turn.deletedAt)))
-        .for('update')
-        .limit(1);
+      const payable = await resolvePayableTurn(tx, dto.turnId);
+      const lockedTurn = payable.target;
 
-      if (!lockedTurn) {
-        throw new NotFoundException(`Turn ${dto.turnId} not found`);
-      }
-
-      if (lockedTurn.status !== 'ACTIVE') {
-        throw new BadRequestException(
-          `Turn is ${lockedTurn.status}. Only ACTIVE turns accept payments`,
-        );
-      }
-
-      // ── 2. Resolve exact slot by (personId + turnOrder + groupId) ──────────
       const [member] = await tx
         .select()
         .from(groupMember)
@@ -95,15 +80,11 @@ export class PaymentService {
         );
       }
 
-      // ── 3. Check for duplicate payment (per slot, not per person) ────────
       const [existing] = await tx
         .select({ id: payment.id, status: payment.status })
         .from(payment)
         .where(
-          and(
-            eq(payment.turnId, dto.turnId),
-            eq(payment.participantId, member.id),
-          ),
+          and(eq(payment.turnId, dto.turnId), eq(payment.participantId, member.id)),
         )
         .limit(1);
 
@@ -113,7 +94,6 @@ export class PaymentService {
         );
       }
 
-      // ── 4. Get contribution amount from group ─────────────────────────────
       const [g] = await tx
         .select({ contributionAmount: group.contributionAmount })
         .from(group)
@@ -123,7 +103,6 @@ export class PaymentService {
       const amount = parseFloat(g.contributionAmount);
       const now = new Date();
 
-      // ── 5. Insert payment ─────────────────────────────────────────────────
       const [createdPayment] = await tx
         .insert(payment)
         .values({
@@ -139,7 +118,6 @@ export class PaymentService {
         })
         .returning();
 
-      // ── 6. Update totalPaidAmount (safe: we hold the FOR UPDATE lock) ─────
       const newTotal = parseFloat(lockedTurn.totalPaidAmount) + amount;
 
       const [updatedTurn] = await tx
@@ -150,42 +128,28 @@ export class PaymentService {
 
       const expected = parseFloat(updatedTurn.totalExpectedAmount);
       const paid = parseFloat(updatedTurn.totalPaidAmount);
+
       let nextTurnActivated = false;
       let groupCompleted = false;
 
-      // ── 7. Complete turn if fully paid ────────────────────────────────────
-      if (paid >= expected) {
-        await tx
-          .update(turn)
-          .set({ status: 'COMPLETED', completedAt: now, updatedAt: now })
-          .where(eq(turn.id, dto.turnId));
+      if (payable.mode === 'active' && paid >= expected) {
+        const completion = await completeActiveTurnAndAdvanceQueue(
+          tx,
+          dto.turnId,
+          lockedTurn.groupId,
+          now,
+        );
+        nextTurnActivated = completion.nextTurnActivated;
+        groupCompleted = completion.groupCompleted;
 
-        updatedTurn.status = 'COMPLETED';
-        updatedTurn.completedAt = now;
-
-        // Activate the next PENDING turn
-        const [nextTurn] = await tx
+        const [refreshed] = await tx
           .select()
           .from(turn)
-          .where(
-            and(eq(turn.groupId, lockedTurn.groupId), eq(turn.status, 'PENDING')),
-          )
-          .orderBy(asc(turn.scheduledDate), asc(turn.turnNumber))
+          .where(eq(turn.id, dto.turnId))
           .limit(1);
-
-        if (nextTurn) {
-          await tx
-            .update(turn)
-            .set({ status: 'ACTIVE', updatedAt: now })
-            .where(eq(turn.id, nextTurn.id));
-          nextTurnActivated = true;
-        } else {
-          // All turns done → complete the group
-          await tx
-            .update(group)
-            .set({ status: 'COMPLETED', updatedAt: now })
-            .where(eq(group.id, lockedTurn.groupId));
-          groupCompleted = true;
+        if (refreshed) {
+          updatedTurn.status = refreshed.status;
+          updatedTurn.completedAt = refreshed.completedAt;
         }
       }
 
@@ -203,6 +167,7 @@ export class PaymentService {
           percentagePaid,
           completedAt: updatedTurn.completedAt,
         },
+        advancePayment: payable.mode === 'advance',
         nextTurnActivated,
         groupCompleted,
       };
@@ -210,8 +175,7 @@ export class PaymentService {
   }
 
   /**
-   * Registers multiple payments for the same active turn in one transaction.
-   * All-or-nothing: any validation failure rolls back the entire batch.
+   * Batch payments for the ACTIVE turn only (advance payments use POST /payments one by one).
    */
   async registerBatchPayment(
     dto: RegisterBatchPaymentDto,
@@ -230,7 +194,7 @@ export class PaymentService {
 
       if (lockedTurn.status !== 'ACTIVE') {
         throw new BadRequestException(
-          `Turn is ${lockedTurn.status}. Only ACTIVE turns accept payments`,
+          'Batch payments are only allowed for the ACTIVE turn. Use POST /payments for advance payments on the next PENDING turn.',
         );
       }
 
@@ -321,29 +285,12 @@ export class PaymentService {
       const paid = parseFloat(updatedTurn.totalPaidAmount);
 
       if (paid >= expected) {
-        await tx
-          .update(turn)
-          .set({ status: 'COMPLETED', completedAt: now, updatedAt: now })
-          .where(eq(turn.id, dto.turnId));
-
-        const [nextTurn] = await tx
-          .select()
-          .from(turn)
-          .where(and(eq(turn.groupId, lockedTurn.groupId), eq(turn.status, 'PENDING')))
-          .orderBy(asc(turn.scheduledDate), asc(turn.turnNumber))
-          .limit(1);
-
-        if (nextTurn) {
-          await tx
-            .update(turn)
-            .set({ status: 'ACTIVE', updatedAt: now })
-            .where(eq(turn.id, nextTurn.id));
-        } else {
-          await tx
-            .update(group)
-            .set({ status: 'COMPLETED', updatedAt: now })
-            .where(eq(group.id, lockedTurn.groupId));
-        }
+        await completeActiveTurnAndAdvanceQueue(
+          tx,
+          dto.turnId,
+          lockedTurn.groupId,
+          now,
+        );
       }
 
       return {
@@ -360,19 +307,41 @@ export class PaymentService {
     turnId: string,
     page = 0,
     size = 50,
-  ): Promise<OffsetPage<typeof payment.$inferSelect>> {
-    const where = and(eq(payment.turnId, turnId), isNull(payment.deletedAt));
+  ): Promise<OffsetPage<PaymentListItemDto>> {
+    const where = and(
+      eq(payment.turnId, turnId),
+      isNull(payment.deletedAt),
+      eq(payment.status, 'PAID'),
+    );
 
-    const [content, [{ total }]] = await Promise.all([
+    const [rows, [{ total }]] = await Promise.all([
       this.db
-        .select()
+        .select({
+          id: payment.id,
+          participantId: person.id,
+          turnOrder: groupMember.turnOrder,
+          method: payment.method,
+          amount: payment.amount,
+          paidAt: payment.paidAt,
+        })
         .from(payment)
+        .innerJoin(groupMember, eq(payment.participantId, groupMember.id))
+        .innerJoin(person, eq(groupMember.personId, person.id))
         .where(where)
-        .orderBy(payment.paidAt)
+        .orderBy(asc(payment.paidAt))
         .limit(size)
         .offset(page * size),
       this.db.select({ total: count() }).from(payment).where(where),
     ]);
+
+    const content: PaymentListItemDto[] = rows.map((r) => ({
+      id: r.id,
+      participantId: r.participantId,
+      turnOrder: r.turnOrder,
+      method: r.method,
+      amount: parseFloat(r.amount),
+      paidAt: r.paidAt,
+    }));
 
     return createOffsetPage(content, Number(total), page, size);
   }

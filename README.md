@@ -368,6 +368,11 @@ Todos los endpoints de miembros devuelven `{ member, person }`:
 
 La lista de pendientes se ordena por apellido/nombre (no por `turnOrder`). El turno activo avanza por `scheduledDate` ascendente.
 
+Si el turno consultado está **ACTIVE**, la respuesta incluye:
+
+- `nextTurn` — siguiente turno PENDING en cola.
+- `participantsAdvancePaid` — quienes ya adelantaron pago de ese siguiente turno.
+
 #### GET /groups/:groupId/turns — Query params
 
 | Param | Tipo | Default | Descripción |
@@ -401,15 +406,26 @@ La lista de pendientes se ordena por apellido/nombre (no por `turnOrder`). El tu
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| POST | `/payments` | Registrar pago de un participante en un turno activo |
-| POST | `/payments/batch` | Registrar varios pagos del mismo turno y método (transacción atómica) |
-| GET | `/payments/turns/:turnId` | Listar pagos de un turno (paginado) |
+| POST | `/payments` | Pago del turno ACTIVE o adelanto del siguiente PENDING |
+| POST | `/payments/batch` | Varios pagos del turno ACTIVE (solo turno activo) |
+| GET | `/payments/turns/:turnId` | Listar pagos de un turno (ACTIVE o PENDING con adelantos) |
+
+#### Pagos adelantados
+
+Con un turno **ACTIVE**, un participante puede:
+
+1. Pagar el turno actual (`turnId` = turno ACTIVE).
+2. **Adelantar** el pago del **siguiente** turno PENDING en cola (`turnId` = id del siguiente PENDING, no saltar turnos).
+
+El adelanto incrementa `totalPaidAmount` del turno PENDING sin activarlo. Al completarse el turno ACTIVE, si el siguiente ya está 100 % pagado, puede auto-completarse y activar el siguiente.
+
+`GET /turns/:id/summary` (turno ACTIVE) incluye `nextTurn` y `participantsAdvancePaid`.
 
 #### POST /payments — Body
 
 | Campo | Tipo | Requerido | Descripción |
 |-------|------|-----------|-------------|
-| `turnId` | string | ✓ | ID del turno (debe estar `ACTIVE`) |
+| `turnId` | string | ✓ | Turno ACTIVE **o** siguiente PENDING (adelanto) |
 | `participantId` | string | ✓ | ID de la persona que paga (`person.id`) |
 | `turnOrder` | number | ✓ | Número de orden del slot (`group_member.turnOrder`). Identifica cuál de los slots de la persona está pagando |
 | `method` | `CASH` \| `QR` | ✓ | Método de pago: efectivo o QR |

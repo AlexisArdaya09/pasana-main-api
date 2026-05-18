@@ -475,11 +475,11 @@ paths:
   /payments:
     post:
       operationId: PaymentController_register
-      summary: Register a payment for a participant in an active turn
+      summary: Register payment (active turn or advance on next pending)
       description: >-
-        Validates participant membership, prevents duplicate payments, updates
-        totalPaidAmount atomically (FOR UPDATE lock). Auto-completes the turn
-        and activates the next one when fully paid.
+        turnId = ACTIVE → cobro del turno actual (auto-completa y activa el
+        siguiente si corresponde). turnId = siguiente turno PENDING inmediato →
+        pago adelantado (suma totalPaidAmount del PENDING sin activarlo).
       parameters: []
       requestBody:
         required: true
@@ -491,7 +491,7 @@ paths:
         '201':
           description: Payment registered
         '400':
-          description: Turn is not ACTIVE
+          description: Turn is not ACTIVE nor immediate next PENDING
         '404':
           description: Turn or participant not found / not a member
         '409':
@@ -501,11 +501,10 @@ paths:
   /payments/batch:
     post:
       operationId: PaymentController_registerBatch
-      summary: Register multiple payments for an active turn (same method)
+      summary: Register multiple payments for the ACTIVE turn only
       description: >-
-        All-or-nothing batch in a single DB transaction (FOR UPDATE on turn).
-        Rolls back if any slot is invalid or already paid. Updates
-        totalPaidAmount once; auto-completes turn when fully paid.
+        All-or-nothing batch on the ACTIVE turn. Advance payments use POST
+        /payments with the next PENDING turn turnId.
       requestBody:
         required: true
         content:
@@ -557,6 +556,7 @@ paths:
     get:
       operationId: PaymentController_findByTurn
       summary: List payments for a turn
+      description: ACTIVE or PENDING turns (includes advance payments).
       parameters:
         - name: turnId
           required: true
@@ -576,7 +576,16 @@ paths:
             type: number
       responses:
         '200':
-          description: ''
+          description: Paginated list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PaymentListItemDto'
       tags:
         - Payments
   /persons:
@@ -1338,6 +1347,21 @@ components:
           description: Ordenados por apellido y nombre. Pendientes de pagar el turno activo.
           items:
             $ref: '#/components/schemas/ParticipantPaymentInfo'
+        nextTurn:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Turn'
+            - type: object
+              properties:
+                beneficiary:
+                  $ref: '#/components/schemas/PersonBeneficiarySummary'
+        participantsAdvancePaid:
+          type: array
+          description: >-
+            Quienes ya pagaron el siguiente turno (PENDING) mientras el actual
+            sigue ACTIVE.
+          items:
+            $ref: '#/components/schemas/AdvancePaymentInfo'
       required:
         - turn
         - group
@@ -1346,6 +1370,51 @@ components:
         - percentagePaid
         - participantsPaid
         - participantsPending
+    AdvancePaymentInfo:
+      type: object
+      properties:
+        personId:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        turnOrder:
+          type: integer
+        paymentId:
+          type: string
+        amount:
+          type: number
+        method:
+          type: string
+          enum:
+            - CASH
+            - QR
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
+    PaymentListItemDto:
+      type: object
+      properties:
+        id:
+          type: string
+        participantId:
+          type: string
+          description: person.id
+        turnOrder:
+          type: integer
+        method:
+          type: string
+          enum:
+            - CASH
+            - QR
+        amount:
+          type: number
+        paidAt:
+          type: string
+          format: date-time
+          nullable: true
     RegisterPaymentDto:
       type: object
       properties:
@@ -1354,7 +1423,7 @@ components:
           description: ID de la persona que realiza el pago (person.id)
         turnId:
           type: string
-          description: ID del turno activo
+          description: ID del turno ACTIVE o del siguiente PENDING (adelanto)
         turnOrder:
           type: number
           description: >-

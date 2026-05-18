@@ -29,7 +29,7 @@ export class TurnController {
   @ApiOperation({
     summary: 'Get full turn summary',
     description:
-      'Returns totalExpectedAmount, totalPaidAmount, percentagePaid, participantsPaid[], participantsPending[]',
+      'ACTIVE turn: participantsPaid/Pending, nextTurn, participantsAdvancePaid. Other statuses: paid/pending for that turn only.',
   })
   @ApiParam({ name: 'id', description: 'Turn ID' })
   @ApiResponse({ status: 200 })
