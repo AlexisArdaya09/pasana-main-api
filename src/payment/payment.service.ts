@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -12,6 +11,7 @@ import { group, groupMember, payment, person, turn } from '../database/schema';
 import { createOffsetPage, OffsetPage } from '../common/pagination/offset-page';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { RegisterBatchPaymentDto } from './dto/register-batch-payment.dto';
+import { RevertPaymentsDto } from './dto/revert-payments.dto';
 import { PaymentListItemDto } from './dto/payment-list-item.dto';
 import {
   completeActiveTurnAndAdvanceQueue,
@@ -40,12 +40,29 @@ export interface BatchPaymentResultItem {
   paymentId: string;
 }
 
+export interface RevertedPaymentItem {
+  participantId: string;
+  turnOrder: number;
+  paymentId: string;
+}
+
+export interface RevertPaymentsResult {
+  turnId: string;
+  reverted: number;
+  revertedAmount: number;
+  payments: RevertedPaymentItem[];
+  advancePayment: boolean;
+}
+
 export interface RegisterBatchPaymentResult {
   turnId: string;
   method: 'CASH' | 'QR';
   registered: number;
   failed: number;
   payments: BatchPaymentResultItem[];
+  advancePayment: boolean;
+  nextTurnActivated: boolean;
+  groupCompleted: boolean;
 }
 
 @Injectable()
@@ -80,11 +97,16 @@ export class PaymentService {
         );
       }
 
+      // Reverted payments are soft-deleted; they must not block a new charge.
       const [existing] = await tx
         .select({ id: payment.id, status: payment.status })
         .from(payment)
         .where(
-          and(eq(payment.turnId, dto.turnId), eq(payment.participantId, member.id)),
+          and(
+            eq(payment.turnId, dto.turnId),
+            eq(payment.participantId, member.id),
+            isNull(payment.deletedAt),
+          ),
         )
         .limit(1);
 
@@ -175,28 +197,14 @@ export class PaymentService {
   }
 
   /**
-   * Batch payments for the ACTIVE turn only (advance payments use POST /payments one by one).
+   * Batch payments for the ACTIVE turn or an advance on the next PENDING turn.
    */
   async registerBatchPayment(
     dto: RegisterBatchPaymentDto,
   ): Promise<RegisterBatchPaymentResult> {
     return this.db.transaction(async (tx) => {
-      const [lockedTurn] = await tx
-        .select()
-        .from(turn)
-        .where(and(eq(turn.id, dto.turnId), isNull(turn.deletedAt)))
-        .for('update')
-        .limit(1);
-
-      if (!lockedTurn) {
-        throw new NotFoundException(`Turn ${dto.turnId} not found`);
-      }
-
-      if (lockedTurn.status !== 'ACTIVE') {
-        throw new BadRequestException(
-          'Batch payments are only allowed for the ACTIVE turn. Use POST /payments for advance payments on the next PENDING turn.',
-        );
-      }
+      const payable = await resolvePayableTurn(tx, dto.turnId);
+      const lockedTurn = payable.target;
 
       const [g] = await tx
         .select({ contributionAmount: group.contributionAmount })
@@ -238,10 +246,17 @@ export class PaymentService {
           );
         }
 
+        // Reverted payments are soft-deleted; they must not block a new charge.
         const [existing] = await tx
           .select({ id: payment.id, status: payment.status })
           .from(payment)
-          .where(and(eq(payment.turnId, dto.turnId), eq(payment.participantId, member.id)))
+          .where(
+            and(
+              eq(payment.turnId, dto.turnId),
+              eq(payment.participantId, member.id),
+              isNull(payment.deletedAt),
+            ),
+          )
           .limit(1);
 
         if (existing?.status === 'PAID') {
@@ -284,13 +299,20 @@ export class PaymentService {
       const expected = parseFloat(updatedTurn.totalExpectedAmount);
       const paid = parseFloat(updatedTurn.totalPaidAmount);
 
-      if (paid >= expected) {
-        await completeActiveTurnAndAdvanceQueue(
+      let nextTurnActivated = false;
+      let groupCompleted = false;
+
+      // An advance payment only increments the pending turn total; it never
+      // completes a turn nor advances the queue.
+      if (payable.mode === 'active' && paid >= expected) {
+        const completion = await completeActiveTurnAndAdvanceQueue(
           tx,
           dto.turnId,
           lockedTurn.groupId,
           now,
         );
+        nextTurnActivated = completion.nextTurnActivated;
+        groupCompleted = completion.groupCompleted;
       }
 
       return {
@@ -298,7 +320,110 @@ export class PaymentService {
         method: dto.method,
         registered: results.length,
         failed: 0,
+        advancePayment: payable.mode === 'advance',
+        nextTurnActivated,
+        groupCompleted,
         payments: results,
+      };
+    });
+  }
+
+  /**
+   * Reverts (soft-deletes) paid slots of the ACTIVE turn or of the next PENDING
+   * turn (advance), returning them to the pending list and subtracting their
+   * amount from the turn total. All-or-nothing.
+   *
+   * Reverting a COMPLETED turn is rejected by resolvePayableTurn: undoing it
+   * would require rolling the turn queue back, which is out of scope here.
+   */
+  async revertPayments(dto: RevertPaymentsDto): Promise<RevertPaymentsResult> {
+    return this.db.transaction(async (tx) => {
+      const payable = await resolvePayableTurn(tx, dto.turnId);
+      const lockedTurn = payable.target;
+
+      const now = new Date();
+      const seenSlots = new Set<string>();
+      const results: RevertedPaymentItem[] = [];
+      let revertedAmount = 0;
+
+      for (const item of dto.payments) {
+        const slotKey = `${item.participantId}:${item.turnOrder}`;
+        if (seenSlots.has(slotKey)) {
+          throw new ConflictException(
+            `Duplicate slot in batch: person ${item.participantId} turnOrder ${item.turnOrder}`,
+          );
+        }
+        seenSlots.add(slotKey);
+
+        const [member] = await tx
+          .select()
+          .from(groupMember)
+          .where(
+            and(
+              eq(groupMember.personId, item.participantId),
+              eq(groupMember.turnOrder, item.turnOrder),
+              eq(groupMember.groupId, lockedTurn.groupId),
+              eq(groupMember.status, 'ACTIVE'),
+              isNull(groupMember.deletedAt),
+            ),
+          )
+          .limit(1);
+
+        if (!member) {
+          throw new NotFoundException(
+            `No active slot found for person ${item.participantId} with turnOrder ${item.turnOrder} in this group`,
+          );
+        }
+
+        const [existing] = await tx
+          .select()
+          .from(payment)
+          .where(
+            and(
+              eq(payment.turnId, dto.turnId),
+              eq(payment.participantId, member.id),
+              eq(payment.status, 'PAID'),
+              isNull(payment.deletedAt),
+            ),
+          )
+          .for('update')
+          .limit(1);
+
+        if (!existing) {
+          throw new NotFoundException(
+            `No paid slot turnOrder=${item.turnOrder} for person ${item.participantId} in turn ${dto.turnId}`,
+          );
+        }
+
+        await tx
+          .update(payment)
+          .set({ deletedAt: now, updatedAt: now })
+          .where(eq(payment.id, existing.id));
+
+        revertedAmount += parseFloat(existing.amount);
+        results.push({
+          participantId: item.participantId,
+          turnOrder: item.turnOrder,
+          paymentId: existing.id,
+        });
+      }
+
+      const newTotal = Math.max(
+        0,
+        parseFloat(lockedTurn.totalPaidAmount) - revertedAmount,
+      );
+
+      await tx
+        .update(turn)
+        .set({ totalPaidAmount: newTotal.toFixed(2), updatedAt: now })
+        .where(eq(turn.id, dto.turnId));
+
+      return {
+        turnId: dto.turnId,
+        reverted: results.length,
+        revertedAmount,
+        payments: results,
+        advancePayment: payable.mode === 'advance',
       };
     });
   }

@@ -10,3 +10,4 @@ export const deliveryDateStrategyEnum = pgEnum('delivery_date_strategy', [
   'SAME_DAY',
   'DAYS_BEFORE',
 ]);
+export const userRoleEnum = pgEnum('user_role', ['SUPER_ADMIN', 'ADMIN']);

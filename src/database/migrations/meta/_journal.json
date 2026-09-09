@@ -85,6 +85,20 @@
       "when": 1777747991773,
       "tag": "0011_fix_pasanaco_data_all_groups",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788924351327,
+      "tag": "0012_payment_partial_unique_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788924351328,
+      "tag": "0013_user_account_auth_fields",
+      "breakpoints": true
     }
   ]
 }

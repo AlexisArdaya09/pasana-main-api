@@ -1,3 +1,4 @@
+import { isNull } from 'drizzle-orm';
 import { numeric, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 import { baseSchema } from '../base/base.schema';
 import { BaseTableType } from '../base/base.types';
@@ -23,8 +24,12 @@ export const payment = pgTable(
     paidAt: timestamp('paid_at'),
   },
   (t) => [
-    // DB-level guard: one payment record per participant per turn
-    uniqueIndex('uq_payment_turn_participant').on(t.turnId, t.participantId),
+    // DB-level guard: one LIVE payment record per participant per turn.
+    // Partial so a reverted (soft-deleted) payment frees the slot and the
+    // participant can be charged again for the same turn.
+    uniqueIndex('uq_payment_turn_participant')
+      .on(t.turnId, t.participantId)
+      .where(isNull(t.deletedAt)),
   ],
 );
 

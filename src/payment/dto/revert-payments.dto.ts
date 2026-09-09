@@ -3,14 +3,13 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
-  IsEnum,
   IsNotEmpty,
   IsString,
   ValidateNested,
 } from 'class-validator';
 import { BatchPaymentItemDto } from './batch-payment-item.dto';
 
-export class RegisterBatchPaymentDto {
+export class RevertPaymentsDto {
   @ApiProperty({
     description:
       'ID del turno ACTIVE (cobro actual) o del siguiente turno PENDING (adelanto)',
@@ -19,13 +18,9 @@ export class RegisterBatchPaymentDto {
   @IsNotEmpty()
   turnId: string;
 
-  @ApiProperty({ description: 'Método de pago (único para todo el lote)', enum: ['CASH', 'QR'], example: 'CASH' })
-  @IsEnum(['CASH', 'QR'])
-  method: 'CASH' | 'QR';
-
   @ApiProperty({
     type: [BatchPaymentItemDto],
-    description: 'Slots a cobrar en este turno',
+    description: 'Slots cuyo pago se quiere revertir',
   })
   @IsArray()
   @ArrayMinSize(1)

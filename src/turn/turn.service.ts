@@ -190,6 +190,7 @@ export class TurnService {
           eq(payment.turnId, turnId),
           eq(payment.participantId, groupMember.id),
           eq(payment.status, 'PAID'),
+          isNull(payment.deletedAt),
         ),
       )
       .where(
