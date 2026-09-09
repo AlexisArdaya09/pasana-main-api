@@ -17,6 +17,7 @@ import {
   completeActiveTurnAndAdvanceQueue,
   resolvePayableTurn,
 } from './payment-turn.logic';
+import { livePaidPaymentForSlot, livePaymentForSlot } from './payment.queries';
 
 export interface RegisterPaymentResult {
   payment: typeof payment.$inferSelect;
@@ -97,17 +98,10 @@ export class PaymentService {
         );
       }
 
-      // Reverted payments are soft-deleted; they must not block a new charge.
       const [existing] = await tx
         .select({ id: payment.id, status: payment.status })
         .from(payment)
-        .where(
-          and(
-            eq(payment.turnId, dto.turnId),
-            eq(payment.participantId, member.id),
-            isNull(payment.deletedAt),
-          ),
-        )
+        .where(livePaymentForSlot(dto.turnId, member.id))
         .limit(1);
 
       if (existing?.status === 'PAID') {
@@ -246,17 +240,10 @@ export class PaymentService {
           );
         }
 
-        // Reverted payments are soft-deleted; they must not block a new charge.
         const [existing] = await tx
           .select({ id: payment.id, status: payment.status })
           .from(payment)
-          .where(
-            and(
-              eq(payment.turnId, dto.turnId),
-              eq(payment.participantId, member.id),
-              isNull(payment.deletedAt),
-            ),
-          )
+          .where(livePaymentForSlot(dto.turnId, member.id))
           .limit(1);
 
         if (existing?.status === 'PAID') {
@@ -378,14 +365,7 @@ export class PaymentService {
         const [existing] = await tx
           .select()
           .from(payment)
-          .where(
-            and(
-              eq(payment.turnId, dto.turnId),
-              eq(payment.participantId, member.id),
-              eq(payment.status, 'PAID'),
-              isNull(payment.deletedAt),
-            ),
-          )
+          .where(livePaidPaymentForSlot(dto.turnId, member.id))
           .for('update')
           .limit(1);
 
