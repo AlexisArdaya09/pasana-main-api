@@ -25,7 +25,8 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "db:seed:super-admin": "dotenv -e .env -- tsx src/database/seed-super-admin.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",
@@ -97,6 +98,9 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "transformIgnorePatterns": [
+      "/node_modules/(?!(@paralleldrive/cuid2|@noble/hashes)/)"
+    ]
   }
 }

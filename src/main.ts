@@ -43,6 +43,7 @@ async function bootstrap() {
       `<a href="/api/docs-yaml" download="${appName}-${version}.yml">⬇ Download OpenAPI YAML</a>`,
     )
     .setVersion(version)
+    .addBearerAuth()
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);

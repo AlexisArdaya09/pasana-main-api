@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './logger/logger.config';
 import { DatabaseModule } from './database/database.module';
+import { AuthModule } from './auth/auth.module';
 import { GroupModule } from './group/group.module';
 import { GroupMemberModule } from './group-member/group-member.module';
 import { TurnModule } from './turn/turn.module';
@@ -19,6 +20,7 @@ import { HealthController } from './health/health.controller';
     }),
     WinstonModule.forRoot(winstonConfig),
     DatabaseModule,
+    AuthModule,
     GroupModule,
     GroupMemberModule,
     TurnModule,
