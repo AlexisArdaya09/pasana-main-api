@@ -1,0 +1,48 @@
+name: Keep Supabase awake
+
+# Supabase pauses free projects after 7 days without activity. A tiny query
+# keeps the project counted as active.
+#
+# Runs every 3 days, not every 6, on purpose: `*/6` fires on days 1, 7, 13, 19
+# and 25, which leaves a 7-day gap between the 25th and the 1st in 30-day
+# months — exactly the pause threshold. Scheduled workflows are also best
+# effort and can be delayed under load, so the extra margin is deliberate.
+on:
+  schedule:
+    - cron: '0 6 */3 * *'
+  workflow_dispatch: {}
+
+# Nothing here reads or writes the repository.
+permissions: {}
+
+concurrency:
+  group: keep-supabase-awake
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query the database
+        env:
+          # Supabase → Project Settings → Database → Connection string → URI
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "::error::SUPABASE_DB_URL secret is not set"
+            exit 1
+          fi
+
+          # psql ships with the runner image, so there is nothing to install.
+          # -q keeps the connection string out of the log on success, and
+          # ON_ERROR_STOP makes a failed query fail the step.
+          psql "${DATABASE_URL}" \
+            --quiet \
+            --no-psqlrc \
+            --set ON_ERROR_STOP=1 \
+            --command 'SELECT 1;' > /dev/null
+
+          echo "Database reachable — project marked active."
