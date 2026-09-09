@@ -23,9 +23,6 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # SUPABASE_DB_URL lives as an environment secret, so the job has to name
-    # the environment or the secret is silently empty.
-    environment: .env
     steps:
       - name: Query the database
         env:
